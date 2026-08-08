@@ -21,7 +21,11 @@ High-performance, lightweight anti-censorship DPI bypass HTTP/HTTPS proxy writte
 |------|-------|---------|-------------|
 | `--port` | `-p` | `8080` | Local port for the proxy server to listen on. |
 | `--bind` | `-b` | `127.0.0.1` | IP address to bind (`0.0.0.0` to allow LAN/router clients). |
-| `--aggressive` | `-a` | `false` | Enables **Aggressive Mode** (pads TLS ClientHello to 512 bytes per RFC 7685). |
+| `--aggressive` | `-a` | `false` | Enables **Aggressive Mode** (proportional TLS ClientHello padding per RFC 7685). |
+| `--disorder` | `-D` | `false` | Enables **TCP Disorder Mode** (sends TLS Record 2 before Record 1 to defeat stateful DPI reassembly). |
+| `--fake-ttl` | `-F` | `0` | Injects fake ClientHello with low socket TTL to mislead DPI middleboxes (0 = disabled). |
+| `--fake-sni` | - | `google.com` | Benign domain name used for fake ClientHello injection. |
+| `--window-shrink` | `-W` | `0` | Restricts TCP socket buffer window size to force micro-segmentation (0 = disabled). |
 | `--doh-url` | `-d` | `https://dns.google/resolve` | DoH (DNS-over-HTTPS) provider endpoint URL. |
 | `--verbose` | `-v` | `false` | Enables verbose debug log output. |
 | `--help` | `-h` | - | Prints help and parameter information. |
@@ -30,7 +34,16 @@ High-performance, lightweight anti-censorship DPI bypass HTTP/HTTPS proxy writte
 ### Parameter Details & Usage Scenarios
 
 - **`-a, --aggressive` (Aggressive Mode)**:  
-  Pads TLS ClientHello packets up to 512 bytes using RFC 7685 Connection Padding. This prevents DPI systems (such as TSPU in Russia, Iran DPI, etc.) from identifying and blocking proxy connections using ClientHello packet size fingerprinting.
+  Adds proportional TLS ClientHello padding using RFC 7685 Connection Padding. This prevents DPI systems (such as TSPU in Russia, Iran DPI, etc.) from identifying and blocking proxy connections using ClientHello packet size fingerprinting.
+
+- **`-D, --disorder` (TCP Disorder Mode)**:  
+  Transmits TLS Record 2 (containing trailing handshake data) *before* TLS Record 1 (containing the SNI split). Confuses stateful DPI reassembly engines while the target server's OS TCP stack correctly re-assembles the stream.
+
+- **`-F, --fake-ttl <TTL>` (Fake Packet Injection)**:  
+  Injects a fake `ClientHello` payload for `--fake-sni` (e.g. `google.com`) with a low TTL (Time-To-Live). The fake packet reaches and misleads the ISP DPI box, while expiring before reaching the target server.
+
+- **`-W, --window-shrink <BYTES>` (TCP Window Shrinking)**:  
+  Restricts socket buffer window size to force OS-level TCP micro-segmentation.
 
 - **`-b, --bind <IP>`**:  
   Use `127.0.0.1` (default) for localhost proxying. Set to `0.0.0.0` when deploying on a home router (OpenWrt) or server to serve all clients on your local network.

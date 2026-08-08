@@ -307,6 +307,7 @@ dependencies = [
  "reqwest",
  "rustls",
  "serde",
+ "socket2",
  "tokio",
  "tracing",
  "tracing-subscriber",

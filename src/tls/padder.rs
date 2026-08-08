@@ -147,7 +147,7 @@ fn has_padding_extension(data: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tls::parser::tests::build_synthetic_client_hello;
+    use crate::tls::parser::build_synthetic_client_hello;
 
     #[test]
     fn test_pad_small_client_hello() {

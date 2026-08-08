@@ -30,6 +30,22 @@ struct Cli {
     /// Verbose log output
     #[arg(short, long, default_value_t = false)]
     verbose: bool,
+
+    /// Enable Out-of-Order TCP Disorder transmission (sends Record 2 before Record 1)
+    #[arg(short = 'D', long, default_value_t = false)]
+    disorder: bool,
+
+    /// Inject a fake ClientHello packet with low TTL to mislead ISP DPI (0 = disabled)
+    #[arg(short = 'F', long, default_value_t = 0)]
+    fake_ttl: u32,
+
+    /// Benign domain to use in fake ClientHello injection
+    #[arg(long, default_value = "google.com")]
+    fake_sni: String,
+
+    /// Restrict TCP socket buffer window size to force micro-segmentation (0 = disabled)
+    #[arg(short = 'W', long, default_value_t = 0)]
+    window_shrink: usize,
 }
 
 #[tokio::main]
@@ -67,6 +83,10 @@ async fn main() -> anyhow::Result<()> {
         bind_addr,
         aggressive_mode: cli.aggressive,
         doh_url: cli.doh_url,
+        disorder_mode: cli.disorder,
+        fake_ttl: cli.fake_ttl,
+        fake_sni: cli.fake_sni,
+        window_shrink: cli.window_shrink,
     };
 
     run_server(config).await?;

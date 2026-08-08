@@ -17,14 +17,21 @@ pub struct ProxyServerConfig {
     pub bind_addr: SocketAddr,
     pub aggressive_mode: bool,
     pub doh_url: String,
+    pub disorder_mode: bool,
+    pub fake_ttl: u32,
+    pub fake_sni: String,
+    pub window_shrink: usize,
 }
 
 pub async fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
     let listener = TcpListener::bind(config.bind_addr).await?;
     tracing::info!(
-        "GreenTunnel Rust Proxy running on http://{} (AggressiveMode: {})",
+        "GreenTunnel Rust Proxy running on http://{} (AggressiveMode: {}, Disorder: {}, FakeTTL: {}, WindowShrink: {})",
         config.bind_addr,
-        config.aggressive_mode
+        config.aggressive_mode,
+        config.disorder_mode,
+        config.fake_ttl,
+        config.window_shrink
     );
 
     let resolver = Arc::new(DohResolver::new(&config.doh_url));
@@ -118,6 +125,13 @@ async fn handle_client(
         // Enable TCP_NODELAY to ensure split packets are sent immediately
         remote.set_nodelay(true).ok();
 
+        // Apply TCP Window Shrinking if configured
+        if config.window_shrink > 0 {
+            let socket_ref = socket2::SockRef::from(&remote);
+            socket_ref.set_recv_buffer_size(config.window_shrink).ok();
+            socket_ref.set_send_buffer_size(config.window_shrink).ok();
+        }
+
         // Respond 200 Connection Established to client
         client
             .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
@@ -129,6 +143,22 @@ async fn handle_client(
         let hello_len = client.read(&mut client_hello_buf).await?;
         if hello_len > 0 {
             let raw_bytes = &client_hello_buf[..hello_len];
+
+            // Fake Packet TTL Injection on a separate dummy probe socket to avoid main TLS stream corruption
+            if config.fake_ttl > 0 && is_client_hello(raw_bytes) {
+                if let Ok(mut fake_stream) = TcpStream::connect(remote_addr).await {
+                    fake_stream.set_ttl(config.fake_ttl).ok();
+                    let fake_hello = crate::tls::build_synthetic_client_hello(Some(&config.fake_sni), false);
+                    let _ = fake_stream.write_all(&fake_hello).await;
+                    let _ = fake_stream.flush().await;
+                    tracing::info!(
+                        "Fake TTL Packet injected on probe socket for {}: fake SNI {}, TTL {}",
+                        host,
+                        config.fake_sni,
+                        config.fake_ttl
+                    );
+                }
+            }
 
             // Step 1: Aggressive Mode Connection Padding (RFC 7685)
             // Skip padding for Meta/Facebook/Instagram domains because Meta's C++ Fizz TLS stack drops padded ClientHello records.
@@ -149,13 +179,13 @@ async fn handle_client(
                     if split_point > TLS_RECORD_HEADER_SIZE && split_point < bytes.len() {
                         let tls_records = fragment_at_offset(&bytes, split_point);
 
-                        // Send record 1 with random TCP segmentation
+                        // Send Record 1 (containing split SNI header) first with random TCP segmentation
                         split_and_write(&tls_records[0], &mut remote).await?;
 
-                        // Step 3: Fast inter-fragment delay (1-5ms) to trigger DPI reassembly timeout without stalling video streams
+                        // Fast inter-fragment delay (1-5ms) to trigger DPI reassembly timeout
                         random_delay(1, 5).await;
 
-                        // Send remaining records directly (Record 1 already broke SNI DPI inspection)
+                        // Send remaining records (Record 2)
                         for rec in &tls_records[1..] {
                             remote.write_all(rec).await?;
                         }

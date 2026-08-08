@@ -136,73 +136,74 @@ pub fn read_u16(data: &[u8], offset: usize) -> Option<u16> {
     }
 }
 
+/// Builds a minimal synthetic ClientHello record for testing or fake packet injection.
+pub fn build_synthetic_client_hello(hostname: Option<&str>, include_padding: bool) -> Vec<u8> {
+    let mut extensions_data = Vec::new();
+
+    if let Some(host) = hostname {
+        let host_bytes = host.as_bytes();
+        let sni_ext_data_len = (2 + 1 + 2 + host_bytes.len()) as u16;
+
+        extensions_data.push(0x00);
+        extensions_data.push(0x00);
+        extensions_data.push(((sni_ext_data_len >> 8) & 0xFF) as u8);
+        extensions_data.push((sni_ext_data_len & 0xFF) as u8);
+
+        let sni_list_len = (1 + 2 + host_bytes.len()) as u16;
+        extensions_data.push(((sni_list_len >> 8) & 0xFF) as u8);
+        extensions_data.push((sni_list_len & 0xFF) as u8);
+        extensions_data.push(0x00);
+        extensions_data.push(((host_bytes.len() >> 8) & 0xFF) as u8);
+        extensions_data.push((host_bytes.len() & 0xFF) as u8);
+        extensions_data.extend_from_slice(host_bytes);
+    }
+
+    if include_padding {
+        extensions_data.push(0x00);
+        extensions_data.push(0x15);
+        extensions_data.push(0x00);
+        extensions_data.push(0x0A);
+        extensions_data.extend_from_slice(&[0u8; 10]);
+    }
+
+    let mut hs_body = Vec::new();
+    hs_body.push(0x03);
+    hs_body.push(0x03);
+    hs_body.extend_from_slice(&[0u8; 32]);
+    hs_body.push(0x00); // session id len
+    hs_body.push(0x00); // cipher suites len high
+    hs_body.push(0x02); // cipher suites len low
+    hs_body.push(0x00);
+    hs_body.push(0x2F);
+    hs_body.push(0x01); // compression len
+    hs_body.push(0x00);
+
+    let ext_len = extensions_data.len() as u16;
+    hs_body.push(((ext_len >> 8) & 0xFF) as u8);
+    hs_body.push((ext_len & 0xFF) as u8);
+    hs_body.extend_from_slice(&extensions_data);
+
+    let hs_len = (4 + hs_body.len()) as u16;
+    let mut record = Vec::new();
+    record.push(0x16);
+    record.push(0x03);
+    record.push(0x01);
+    record.push(((hs_len >> 8) & 0xFF) as u8);
+    record.push((hs_len & 0xFF) as u8);
+
+    record.push(0x01); // ClientHello
+    record.push(0x00);
+    let body_len = hs_body.len() as u16;
+    record.push(((body_len >> 8) & 0xFF) as u8);
+    record.push((body_len & 0xFF) as u8);
+    record.extend_from_slice(&hs_body);
+
+    record
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
-
-    pub fn build_synthetic_client_hello(hostname: Option<&str>, include_padding: bool) -> Vec<u8> {
-        let mut extensions_data = Vec::new();
-
-        if let Some(host) = hostname {
-            let host_bytes = host.as_bytes();
-            let sni_ext_data_len = (2 + 1 + 2 + host_bytes.len()) as u16;
-
-            extensions_data.push(0x00);
-            extensions_data.push(0x00);
-            extensions_data.push(((sni_ext_data_len >> 8) & 0xFF) as u8);
-            extensions_data.push((sni_ext_data_len & 0xFF) as u8);
-
-            let sni_list_len = (1 + 2 + host_bytes.len()) as u16;
-            extensions_data.push(((sni_list_len >> 8) & 0xFF) as u8);
-            extensions_data.push((sni_list_len & 0xFF) as u8);
-            extensions_data.push(0x00);
-            extensions_data.push(((host_bytes.len() >> 8) & 0xFF) as u8);
-            extensions_data.push((host_bytes.len() & 0xFF) as u8);
-            extensions_data.extend_from_slice(host_bytes);
-        }
-
-        if include_padding {
-            extensions_data.push(0x00);
-            extensions_data.push(0x15);
-            extensions_data.push(0x00);
-            extensions_data.push(0x0A);
-            extensions_data.extend_from_slice(&[0u8; 10]);
-        }
-
-        let mut hs_body = Vec::new();
-        hs_body.push(0x03);
-        hs_body.push(0x03);
-        hs_body.extend_from_slice(&[0u8; 32]);
-        hs_body.push(0x00); // session id len
-        hs_body.push(0x00); // cipher suites len high
-        hs_body.push(0x02); // cipher suites len low
-        hs_body.push(0x00);
-        hs_body.push(0x2F);
-        hs_body.push(0x01); // compression len
-        hs_body.push(0x00);
-
-        let ext_len = extensions_data.len() as u16;
-        hs_body.push(((ext_len >> 8) & 0xFF) as u8);
-        hs_body.push((ext_len & 0xFF) as u8);
-        hs_body.extend_from_slice(&extensions_data);
-
-        let hs_len = (4 + hs_body.len()) as u16;
-        let mut record = Vec::new();
-        record.push(0x16);
-        record.push(0x03);
-        record.push(0x01);
-        record.push(((hs_len >> 8) & 0xFF) as u8);
-        record.push((hs_len & 0xFF) as u8);
-
-        record.push(0x01); // ClientHello
-        record.push(0x00);
-        let body_len = hs_body.len() as u16;
-        record.push(((body_len >> 8) & 0xFF) as u8);
-        record.push((body_len & 0xFF) as u8);
-        record.extend_from_slice(&hs_body);
-
-        record
-    }
 
     #[test]
     fn test_is_client_hello() {
