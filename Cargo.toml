@@ -6,13 +6,21 @@ authors = ["Ali Kemal Öcalan <alikemalocalan@gmail.com>"]
 description = "Lightweight anti-censorship DPI bypass proxy written in Rust for desktop, servers, and OpenWrt routers."
 
 [dependencies]
-tokio = { version = "1.53.1", features = ["full"] }
-clap = { version = "4.6.6", features = ["derive"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "io-util", "time", "macros"] }
+clap = { version = "4.6.6", features = ["derive", "std", "help", "usage"], default-features = false }
 reqwest = { version = "0.13.4", features = ["json", "rustls-no-provider"], default-features = false }
 rustls = { version = "0.23.43", features = ["ring", "std"], default-features = false }
-serde = { version = "1.0.229", features = ["derive"] }
-tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+serde = { version = "1.0.229", features = ["derive"], default-features = false }
+tracing = { version = "0.1.44", features = ["std"], default-features = false }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"], default-features = false }
 rand = "0.10.2"
 anyhow = "1.0.104"
 socket2 = "0.6.5"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+

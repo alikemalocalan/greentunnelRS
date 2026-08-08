@@ -63,7 +63,7 @@ async fn handle_client(
     resolver: Arc<DohResolver>,
     config: Arc<ProxyServerConfig>,
 ) -> anyhow::Result<()> {
-    let mut buf = vec![0u8; 4096];
+    let mut buf = [0u8; 4096];
     let n = client.read(&mut buf).await?;
     if n == 0 {
         return Ok(());
@@ -139,7 +139,7 @@ async fn handle_client(
         client.flush().await?;
 
         // Read ClientHello record from client
-        let mut client_hello_buf = vec![0u8; 8192];
+        let mut client_hello_buf = [0u8; 8192];
         let hello_len = client.read(&mut client_hello_buf).await?;
         if hello_len > 0 {
             let raw_bytes = &client_hello_buf[..hello_len];
@@ -199,7 +199,7 @@ async fn handle_client(
                         );
 
                         // Tunnel remaining bidirectional TCP stream
-                        tunnel_bidirectional(client, remote).await?;
+                        tunnel_bidirectional(&mut client, &mut remote).await?;
                         return Ok(());
                     }
                 }
@@ -210,7 +210,7 @@ async fn handle_client(
         }
 
         // Tunnel remaining bidirectional TCP stream
-        tunnel_bidirectional(client, remote).await?;
+        tunnel_bidirectional(&mut client, &mut remote).await?;
     } else {
         // Plaintext HTTP request redirect to HTTPS
         let response = format!(
@@ -223,17 +223,7 @@ async fn handle_client(
     Ok(())
 }
 
-async fn tunnel_bidirectional(mut client: TcpStream, mut remote: TcpStream) -> anyhow::Result<()> {
-    let (mut client_read, mut client_write) = client.split();
-    let (mut remote_read, mut remote_write) = remote.split();
-
-    let client_to_remote = tokio::io::copy(&mut client_read, &mut remote_write);
-    let remote_to_client = tokio::io::copy(&mut remote_read, &mut client_write);
-
-    tokio::select! {
-        _ = client_to_remote => {},
-        _ = remote_to_client => {},
-    }
-
+async fn tunnel_bidirectional(client: &mut TcpStream, remote: &mut TcpStream) -> anyhow::Result<()> {
+    tokio::io::copy_bidirectional(client, remote).await?;
     Ok(())
 }
