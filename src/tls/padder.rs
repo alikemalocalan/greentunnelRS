@@ -31,10 +31,15 @@ pub fn pad(data: &[u8], target_size: usize) -> Vec<u8> {
         return data.to_vec();
     }
 
-    // Calculate adaptive target size for small ClientHello records
-    // Avoid inflating tiny ClientHellos (e.g. 200B) with >250B of zero padding.
+    // Calculate proportional target size for ClientHello records.
+    // Avoid inflating tiny ClientHellos (e.g. 163B) with massive padding (>50% of packet size),
+    // because strict L7 load balancers (like Meta Proxygen on i.instagram.com) drop ClientHellos
+    // where padding extension payload exceeds the ClientHello body size.
+    let max_padding_for_record = (record_data.len() / 2).clamp(32, 128);
+    let target_for_record = record_data.len() + max_padding_for_record;
+
     let adaptive_target = if target_size == DEFAULT_TARGET_SIZE {
-        target_size.min(record_data.len() + 128).max(384)
+        target_size.min(target_for_record)
     } else {
         target_size
     };
@@ -150,7 +155,7 @@ mod tests {
         assert!(original.len() < DEFAULT_TARGET_SIZE);
 
         let padded = pad(&original, DEFAULT_TARGET_SIZE);
-        assert!(padded.len() >= 384);
+        assert!(padded.len() > original.len());
         assert!(has_padding_extension(&padded));
     }
 
@@ -164,8 +169,9 @@ mod tests {
     #[test]
     fn test_adaptive_padding() {
         let original = build_synthetic_client_hello(Some("example.com"), false);
+        let expected_pad = (original.len() / 2).clamp(32, 128);
         let padded = pad(&original, DEFAULT_TARGET_SIZE);
-        assert_eq!(padded.len(), 384.min(original.len() + 128).max(384));
+        assert_eq!(padded.len(), original.len() + expected_pad);
     }
 
     #[test]
