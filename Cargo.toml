@@ -8,10 +8,9 @@ description = "Lightweight anti-censorship DPI bypass proxy written in Rust for 
 [dependencies]
 tokio = { version = "1.53.1", features = ["full"] }
 clap = { version = "4.6.6", features = ["derive"] }
-reqwest = { version = "0.12.28", features = ["json", "rustls-tls"], default-features = false }
+reqwest = { version = "0.13.4", features = ["json", "rustls"], default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-rand = "0.8.7"
+rand = "0.10.2"
 anyhow = "1.0.104"

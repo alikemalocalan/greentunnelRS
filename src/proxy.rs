@@ -133,13 +133,9 @@ async fn handle_client(
                 raw_bytes.to_vec()
             };
 
-            // Step 2: SNI Location & Layer 5 TLS Record Fragmentation
             if let Some(sni_info) = find_sni_info(&bytes) {
                 if sni_info.hostname_length > 4 {
-                    let cut_in_sni = rand::Rng::gen_range(
-                        &mut rand::thread_rng(),
-                        3..=8.min(sni_info.hostname_length - 1),
-                    );
+                    let cut_in_sni = rand::random_range(3..=8.min(sni_info.hostname_length - 1));
                     let split_point = sni_info.hostname_offset + cut_in_sni;
 
                     if split_point > TLS_RECORD_HEADER_SIZE && split_point < bytes.len() {
