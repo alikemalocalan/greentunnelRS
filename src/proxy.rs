@@ -125,11 +125,12 @@ async fn handle_client(
         // Enable TCP_NODELAY to ensure split packets are sent immediately
         remote.set_nodelay(true).ok();
 
-        // Apply TCP Window Shrinking if configured
+        // Apply TCP Window Shrinking if configured (clamp to minimum 4096 bytes on Linux/OpenWrt to prevent TCP Zero Window stalls)
         if config.window_shrink > 0 {
+            let safe_win = config.window_shrink.max(4096);
             let socket_ref = socket2::SockRef::from(&remote);
-            socket_ref.set_recv_buffer_size(config.window_shrink).ok();
-            socket_ref.set_send_buffer_size(config.window_shrink).ok();
+            socket_ref.set_recv_buffer_size(safe_win).ok();
+            socket_ref.set_send_buffer_size(safe_win).ok();
         }
 
         // Respond 200 Connection Established to client
