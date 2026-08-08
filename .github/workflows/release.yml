@@ -1,0 +1,47 @@
+name: Release Build
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build OpenWrt 64-bit ARM Binary
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+
+      - name: Install cross-compilation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools
+
+      - name: Build binary for OpenWrt (aarch64-unknown-linux-musl)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+        run: |
+          cargo build --release --target aarch64-unknown-linux-musl
+
+      - name: Prepare release asset
+        run: |
+          cp target/aarch64-unknown-linux-musl/release/greentunnelRS greentunnelRS-openwrt-aarch64
+          tar -czvf greentunnelRS-openwrt-aarch64.tar.gz greentunnelRS-openwrt-aarch64
+
+      - name: Upload Binary to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            greentunnelRS-openwrt-aarch64
+            greentunnelRS-openwrt-aarch64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
