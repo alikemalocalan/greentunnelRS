@@ -24,7 +24,22 @@ pub struct ProxyServerConfig {
 }
 
 pub async fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
-    let listener = TcpListener::bind(config.bind_addr).await?;
+    let domain = if config.bind_addr.is_ipv6() {
+        socket2::Domain::IPV6
+    } else {
+        socket2::Domain::IPV4
+    };
+    let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))?;
+    socket.set_reuse_address(true).ok();
+    #[cfg(all(unix, not(target_os = "solaris"), not(target_os = "illumos")))]
+    socket.set_reuse_port(true).ok();
+    socket.set_nonblocking(true)?;
+    socket.bind(&config.bind_addr.into())?;
+    socket.listen(1024)?;
+
+    let std_listener: std::net::TcpListener = socket.into();
+    let listener = TcpListener::from_std(std_listener)?;
+
     tracing::info!(
         "GreenTunnel Rust Proxy running on http://{} (AggressiveMode: {}, Disorder: {}, FakeTTL: {}, WindowShrink: {})",
         config.bind_addr,
@@ -63,6 +78,9 @@ async fn handle_client(
     resolver: Arc<DohResolver>,
     config: Arc<ProxyServerConfig>,
 ) -> anyhow::Result<()> {
+    // Enable TCP_NODELAY on client socket to eliminate Linux 40ms Nagle delay during HTTP CONNECT handshake
+    client.set_nodelay(true).ok();
+
     let mut buf = [0u8; 4096];
     let n = client.read(&mut buf).await?;
     if n == 0 {
@@ -124,6 +142,11 @@ async fn handle_client(
 
         // Enable TCP_NODELAY to ensure split packets are sent immediately
         remote.set_nodelay(true).ok();
+
+        // Apply TCP KeepAlive to prevent dead socket leaks on OpenWrt Linux kernel
+        let keepalive = socket2::TcpKeepalive::new().with_time(std::time::Duration::from_secs(60));
+        socket2::SockRef::from(&client).set_tcp_keepalive(&keepalive).ok();
+        socket2::SockRef::from(&remote).set_tcp_keepalive(&keepalive).ok();
 
         // Apply TCP Window Shrinking if configured (clamp to minimum 4096 bytes on Linux/OpenWrt to prevent TCP Zero Window stalls)
         if config.window_shrink > 0 {
