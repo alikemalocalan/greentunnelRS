@@ -92,22 +92,13 @@ chmod +x greentunnelRS-openwrt-aarch64
 
 ## Cross-Compiling for OpenWrt Routers
 
-You can easily cross-compile the single binary for any OpenWrt router architecture:
+On macOS/Linux, you can cross-compile using `cross` (Docker-backed Rust cross-compiler):
 
-### A. MIPS Big Endian (e.g. Atheros AR71XX / AR9331 routers)
 ```bash
-rustup target add mips-unknown-linux-musl
-cargo build --release --target mips-unknown-linux-musl
+cargo install cross --git https://github.com/cross-rs/cross
+
+# Build for 64-bit ARM OpenWrt
+cross build --release --target aarch64-unknown-linux-musl
 ```
 
-### B. MIPS Little Endian (e.g. MediaTek MT7620 / MT7621 routers)
-```bash
-rustup target add mipsel-unknown-linux-musl
-cargo build --release --target mipsel-unknown-linux-musl
-```
-
-### C. ARM 64-bit (e.g. Raspberry Pi / Modern OpenWrt Routers)
-```bash
-rustup target add aarch64-unknown-linux-musl
-cargo build --release --target aarch64-unknown-linux-musl
-```
+*Note: If you push a tag/release to GitHub, the included GitHub Action automatically builds and attaches the `aarch64-unknown-linux-musl` binary to your release page.*
