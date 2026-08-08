@@ -42,6 +42,18 @@ pub fn is_http_connect(header_line: &str) -> bool {
     header_line.to_uppercase().starts_with("CONNECT ")
 }
 
+/// Detects domains (like Meta/Instagram/Facebook/WhatsApp) whose proprietary TLS stack (Fizz TLS) rejects TLS padding extensions.
+pub fn is_padding_incompatible_domain(host: &str) -> bool {
+    let lower = host.to_lowercase();
+    lower.ends_with("instagram.com")
+        || lower.ends_with("facebook.com")
+        || lower.ends_with("fbcdn.net")
+        || lower.ends_with("cdninstagram.com")
+        || lower.ends_with("messenger.com")
+        || lower.ends_with("whatsapp.net")
+        || lower.ends_with("whatsapp.com")
+}
+
 /// Parses the target domain and port from an HTTP CONNECT line (e.g. "CONNECT youtube.com:443 HTTP/1.1").
 pub fn parse_connect_target(request_str: &str) -> Option<(String, u16)> {
     let first_line = request_str.lines().next()?;
@@ -94,6 +106,15 @@ mod tests {
         assert!(!cleaned.contains("Via:"));
         assert!(!cleaned.contains("X-Forwarded-For:"));
         assert!(cleaned.contains("Host: example.com"));
+    }
+
+    #[test]
+    fn test_is_padding_incompatible_domain() {
+        assert!(is_padding_incompatible_domain("i.instagram.com"));
+        assert!(is_padding_incompatible_domain("graph.facebook.com"));
+        assert!(is_padding_incompatible_domain("scontent-vie1-1.cdninstagram.com"));
+        assert!(!is_padding_incompatible_domain("youtube.com"));
+        assert!(!is_padding_incompatible_domain("wikipedia.org"));
     }
 }
 

@@ -9,7 +9,8 @@ use crate::tls::{
     TLS_RECORD_HEADER_SIZE,
 };
 use crate::utils::{
-    is_http_connect, parse_connect_target, random_delay, split_and_write, strip_proxy_headers,
+    is_http_connect, is_padding_incompatible_domain, parse_connect_target, random_delay,
+    split_and_write, strip_proxy_headers,
 };
 
 pub struct ProxyServerConfig {
@@ -130,7 +131,11 @@ async fn handle_client(
             let raw_bytes = &client_hello_buf[..hello_len];
 
             // Step 1: Aggressive Mode Connection Padding (RFC 7685)
-            let bytes = if config.aggressive_mode && is_client_hello(raw_bytes) {
+            // Skip padding for Meta/Facebook/Instagram domains because Meta's C++ Fizz TLS stack drops padded ClientHello records.
+            let bytes = if config.aggressive_mode
+                && !is_padding_incompatible_domain(&host)
+                && is_client_hello(raw_bytes)
+            {
                 pad(raw_bytes, DEFAULT_TARGET_SIZE)
             } else {
                 raw_bytes.to_vec()
