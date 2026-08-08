@@ -14,31 +14,52 @@ pub fn pad(data: &[u8], target_size: usize) -> Vec<u8> {
         return data.to_vec();
     }
 
-    if data.len() >= target_size {
+    // Extract exact TLS record boundary if data contains trailing bytes
+    let record_payload_len = match read_u16(data, 3) {
+        Some(len) => len as usize,
+        None => return data.to_vec(),
+    };
+    let record_len = TLS_RECORD_HEADER_SIZE + record_payload_len;
+
+    let (record_data, trailing_data) = if data.len() > record_len {
+        (&data[..record_len], &data[record_len..])
+    } else {
+        (data, &[][..])
+    };
+
+    if has_padding_extension(record_data) {
         return data.to_vec();
     }
 
-    if has_padding_extension(data) {
+    // Calculate adaptive target size for small ClientHello records
+    // Avoid inflating tiny ClientHellos (e.g. 200B) with >250B of zero padding.
+    let adaptive_target = if target_size == DEFAULT_TARGET_SIZE {
+        target_size.min(record_data.len() + 128).max(384)
+    } else {
+        target_size
+    };
+
+    if record_data.len() >= adaptive_target {
         return data.to_vec();
     }
 
-    let padding_needed = target_size - data.len();
+    let padding_needed = adaptive_target - record_data.len();
     if padding_needed < 4 {
         return data.to_vec();
     }
 
-    let ext_len_offset = match find_extensions_length_offset(data) {
+    let ext_len_offset = match find_extensions_length_offset(record_data) {
         Some(offset) => offset,
         None => return data.to_vec(),
     };
 
-    let orig_ext_len = match read_u16(data, ext_len_offset) {
+    let orig_ext_len = match read_u16(record_data, ext_len_offset) {
         Some(len) => len as usize,
         None => return data.to_vec(),
     };
 
     let ext_end = ext_len_offset + 2 + orig_ext_len;
-    if ext_end > data.len() {
+    if ext_end > record_data.len() {
         return data.to_vec();
     }
 
@@ -51,11 +72,11 @@ pub fn pad(data: &[u8], target_size: usize) -> Vec<u8> {
     padding_extension[3] = (pad_ext_data_len & 0xFF) as u8;
 
     // Create padded vector and insert padding extension right at ext_end
-    let mut padded = Vec::with_capacity(data.len() + padding_needed);
-    padded.extend_from_slice(&data[..ext_end]);
+    let mut padded = Vec::with_capacity(record_data.len() + padding_needed);
+    padded.extend_from_slice(&record_data[..ext_end]);
     padded.extend_from_slice(&padding_extension);
-    if data.len() > ext_end {
-        padded.extend_from_slice(&data[ext_end..]);
+    if record_data.len() > ext_end {
+        padded.extend_from_slice(&record_data[ext_end..]);
     }
 
     // 1. Update TLS Record Length (bytes 3-4)
@@ -64,7 +85,7 @@ pub fn pad(data: &[u8], target_size: usize) -> Vec<u8> {
     padded[4] = (new_record_len & 0xFF) as u8;
 
     // 2. Update Handshake Header Length (bytes 6-8, 24-bit uint)
-    let orig_handshake_len = ((data[6] as u32) << 16) | ((data[7] as u32) << 8) | (data[8] as u32);
+    let orig_handshake_len = ((record_data[6] as u32) << 16) | ((record_data[7] as u32) << 8) | (record_data[8] as u32);
     let new_handshake_len = orig_handshake_len + padding_needed as u32;
     padded[6] = ((new_handshake_len >> 16) & 0xFF) as u8;
     padded[7] = ((new_handshake_len >> 8) & 0xFF) as u8;
@@ -77,10 +98,14 @@ pub fn pad(data: &[u8], target_size: usize) -> Vec<u8> {
 
     tracing::info!(
         "Aggressive Mode (Rust): Padded ClientHello from {} to {} bytes (+{} padding bytes)",
-        data.len(),
+        record_data.len(),
         padded.len(),
         padding_needed
     );
+
+    if !trailing_data.is_empty() {
+        padded.extend_from_slice(trailing_data);
+    }
 
     padded
 }
@@ -125,9 +150,7 @@ mod tests {
         assert!(original.len() < DEFAULT_TARGET_SIZE);
 
         let padded = pad(&original, DEFAULT_TARGET_SIZE);
-        assert_eq!(padded.len(), DEFAULT_TARGET_SIZE);
-
-        // Check if padding extension 0x0015 was added
+        assert!(padded.len() >= 384);
         assert!(has_padding_extension(&padded));
     }
 
@@ -136,5 +159,22 @@ mod tests {
         let original = build_synthetic_client_hello(Some("example.com"), true);
         let padded = pad(&original, DEFAULT_TARGET_SIZE);
         assert_eq!(original, padded);
+    }
+
+    #[test]
+    fn test_adaptive_padding() {
+        let original = build_synthetic_client_hello(Some("example.com"), false);
+        let padded = pad(&original, DEFAULT_TARGET_SIZE);
+        assert_eq!(padded.len(), 384.min(original.len() + 128).max(384));
+    }
+
+    #[test]
+    fn test_pad_with_trailing_data() {
+        let mut original = build_synthetic_client_hello(Some("example.com"), false);
+        let trailing = b"EXTRA_BYTES_IN_BUFFER";
+        original.extend_from_slice(trailing);
+
+        let padded = pad(&original, DEFAULT_TARGET_SIZE);
+        assert!(padded.ends_with(trailing));
     }
 }

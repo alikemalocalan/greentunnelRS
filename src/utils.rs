@@ -14,7 +14,7 @@ pub const PROXY_HEADERS_TO_REMOVE: &[&str] = &[
     "proxy-connection",
 ];
 
-/// Splits a buffer into small randomized TCP segments (40-160 bytes) and writes them out.
+/// Splits a buffer into small randomized TCP segments (80-256 bytes) and writes them out.
 pub async fn split_and_write(data: &[u8], stream: &mut TcpStream) -> Result<(), std::io::Error> {
     if data.is_empty() {
         return Ok(());
@@ -22,7 +22,7 @@ pub async fn split_and_write(data: &[u8], stream: &mut TcpStream) -> Result<(), 
 
     let mut offset = 0;
     while offset < data.len() {
-        let chunk_size = rand::random_range(40..=160).min(data.len() - offset);
+        let chunk_size = rand::random_range(80..=256).min(data.len() - offset);
         let chunk = &data[offset..offset + chunk_size];
         stream.write_all(chunk).await?;
         offset += chunk_size;

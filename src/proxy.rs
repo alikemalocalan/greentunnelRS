@@ -114,6 +114,9 @@ async fn handle_client(
             }
         };
 
+        // Enable TCP_NODELAY to ensure split packets are sent immediately
+        remote.set_nodelay(true).ok();
+
         // Respond 200 Connection Established to client
         client
             .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
@@ -144,16 +147,17 @@ async fn handle_client(
                         // Send record 1 with random TCP segmentation
                         split_and_write(&tls_records[0], &mut remote).await?;
 
-                        // Step 3: Inter-fragment delay (1-30ms) to trigger DPI reassembly timeout
-                        random_delay(1, 30).await;
+                        // Step 3: Fast inter-fragment delay (1-5ms) to trigger DPI reassembly timeout without stalling video streams
+                        random_delay(1, 5).await;
 
-                        // Send remaining records
+                        // Send remaining records directly (Record 1 already broke SNI DPI inspection)
                         for rec in &tls_records[1..] {
-                            split_and_write(rec, &mut remote).await?;
+                            remote.write_all(rec).await?;
                         }
+                        remote.flush().await?;
 
                         tracing::info!(
-                            "DPI Bypass applied for {}: split at byte {}, delay 1-30ms, {} TLS records",
+                            "DPI Bypass applied for {}: split at byte {}, delay 1-5ms, {} TLS records",
                             host,
                             split_point,
                             tls_records.len()
