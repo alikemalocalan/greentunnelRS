@@ -107,13 +107,14 @@ impl DohResolver {
         tls.read_exact(&mut len_buf).await.ok()?;
         let resp_len = u16::from_be_bytes(len_buf) as usize;
 
-        if resp_len < 12 || resp_len > 4096 {
+        if resp_len < 12 || resp_len > 1024 {
             return None;
         }
 
-        let mut resp_buf = vec![0u8; resp_len];
-        tls.read_exact(&mut resp_buf).await.ok()?;
-        Some(resp_buf)
+        let mut resp_buf = [0u8; 1024];
+        let buf_slice = &mut resp_buf[..resp_len];
+        tls.read_exact(buf_slice).await.ok()?;
+        Some(buf_slice.to_vec())
     }
 }
 

@@ -18,7 +18,7 @@ socket2 = "0.6.5"
 webpki-roots = "1.0.9"
 
 [profile.release]
-opt-level = 3
+opt-level = "s"
 lto = "fat"
 codegen-units = 1
 panic = "abort"
