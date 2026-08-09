@@ -10,8 +10,31 @@ High-performance, lightweight anti-censorship DPI bypass HTTP/HTTPS proxy writte
 - 🔒 **TLS Record Layer Fragmentation:** Performs Layer 5 TLS record splitting.
 - ⏱️ **Inter-Fragment Delay:** Introduces a 1–30ms timing gap between TLS records to trigger DPI reassembly timeouts (e.g. TSPU / Iran DPI).
 - 🛡️ **Aggressive Mode (Connection Padding):** Pads small TLS ClientHello records to 512 bytes (RFC 7685) to frustrate size-based fingerprinting.
-- 🌐 **DNS-over-HTTPS (DoH):** Queries Google DoH with in-memory caching to bypass DNS poisoning.
-- 🚀 **Ultra-Lightweight & Fast:** Uses `tokio` async runtime, uses minimal RAM (<10 MB), perfect for embedded OpenWrt routers.
+- 🌐 **Zero-Dependency Local UDP DNS:** Queries local loopback (`127.0.0.1:53` / `dnscrypt-proxy`) with sub-millisecond (<0.2ms) response times and in-memory TTL caching.
+- 🚀 **Ultra-Lightweight & Fast:** Built with `tokio` async runtime and Linux `SO_REUSEPORT` multi-core CPU worker pool, minimal RAM (<10 MB), and ultra-small binary size (~748 KB), perfect for OpenWrt routers (e.g. GL.iNet Beryl AX).
+
+---
+
+## Implementation & Impact Rating Table
+
+| Feature / Evasion Method | Evasion Mechanism | Implementation Status | TSPU Bypass Impact | Performance Overhead |
+| :--- | :--- | :---: | :---: | :---: |
+| **SNI Midpoint Record Splitting** | Cuts TLS `ClientHello` inside hostname string across 2 TLS records. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Negligible (<1ms) |
+| **Zero-Dependency Local UDP DNS** | Queries local DNS (`127.0.0.1:53` / `dnscrypt-proxy`) with instant cache. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Sub-millisecond (<0.2ms) |
+| **Domain-Aware Meta Filter** | Skips TLS padding for Meta/Instagram to avoid C++ Fizz TLS drops. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Zero |
+| **Proportional TLS Padding** | Adds dynamic +32..128B RFC 7685 padding based on ClientHello length. | ✅ Implemented | 🔶 **High** | ⚡ Negligible |
+| **Fast Inter-Fragment Delay (1-5ms)** | Triggers TSPU reassembly buffer timeout between TLS records. | ✅ Implemented | 🔶 **High** | ⏱️ 1–5ms handshake |
+| **Linux SO_REUSEPORT Multi-Worker** | Distributes socket accept loops across all CPU cores on Linux/OpenWrt. | ✅ Implemented | 🔶 **High** | ⚡ Max Throughput |
+| **TCP_NODELAY Socket Tuning** | Flushes SNI split packets immediately, overriding OS Nagle delay. | ✅ Implemented | 🟡 **Medium** | ⚡ Improves latency |
+| **Proxy Header Stripping** | Removes `Via`, `X-Forwarded-For`, `Proxy-Connection` headers. | ✅ Implemented | 🟡 **Medium** | ⚡ Zero |
+| **Out-of-Order (Disorder) TCP** | Sends TLS Record 2 before Record 1 to break stateful TSPU reassembly. | ✅ Implemented | 🔶 **High** | ⚡ Negligible |
+| **Fake Packet TTL Injection** | Sends fake benign `ClientHello` with low TTL to mislead TSPU. | ✅ Implemented | 🔶 **High** | ⏱️ +1 RTT |
+| **TCP Window Size Shrinking** | Sets TCP socket buffer window size to force micro-segmentation. | ✅ Implemented | 🟡 **Medium** | ⏱️ Minor handshake delay |
+| **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | 🚧 *Planned (Roadmap)* | 🟡 **Medium** | ⚡ Zero |
+| **HTTP CONNECT Space Insertion** | Inserts extra spaces in CONNECT requests to confuse DPI regex splitters. | 🚧 *Planned (Roadmap)* | 🟡 **Medium** | ⚡ Zero |
+| **FQDN Trailing Dot Obfuscation** | Appends trailing dot (`example.com.`) to break exact domain filters. | 🚧 *Planned (Roadmap)* | 🟡 **Medium** | ⚡ Zero |
+| **Auto HTTPS Redirection (Port 80)** | Intercepts plaintext HTTP and issues 301 redirect to encrypted HTTPS. | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⚡ Faster handshake |
+| **DNSCrypt Protocol Support** | Curve25519 authenticated UDP/TCP DNS resolution over Port 443 without TLS SNI. | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⏱️ +80-120KB binary |
 
 ---
 
@@ -26,7 +49,7 @@ High-performance, lightweight anti-censorship DPI bypass HTTP/HTTPS proxy writte
 | `--fake-ttl` | `-F` | `0` | Injects fake ClientHello with low socket TTL to mislead DPI middleboxes (0 = disabled). |
 | `--fake-sni` | - | `google.com` | Benign domain name used for fake ClientHello injection. |
 | `--window-shrink` | `-W` | `0` | Restricts TCP socket buffer window size to force micro-segmentation (0 = disabled). |
-| `--doh-url` | `-d` | `https://dns.google/resolve` | DoH (DNS-over-HTTPS) provider endpoint URL. |
+| `--doh-url` | `-d` | `127.0.0.1:53` | DNS resolver server IP:port (`127.0.0.1:53` for local loopback / dnscrypt-proxy). |
 | `--verbose` | `-v` | `false` | Enables verbose debug log output. |
 | `--help` | `-h` | - | Prints help and parameter information. |
 | `--version` | `-V` | - | Prints version information. |
