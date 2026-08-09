@@ -17,24 +17,24 @@ High-performance, lightweight anti-censorship DPI bypass HTTP/HTTPS proxy writte
 
 ## Implementation & Impact Rating Table
 
-| Feature / Evasion Method | Evasion Mechanism | Implementation Status | TSPU Bypass Impact | Performance Overhead |
-| :--- | :--- | :---: | :---: | :---: |
-| **SNI Midpoint Record Splitting** | Cuts TLS `ClientHello` inside hostname string across 2 TLS records. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Negligible (<1ms) |
-| **Zero-Dependency Local UDP DNS** | Queries local DNS (`127.0.0.1:53` / `dnscrypt-proxy`) with instant cache. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Sub-millisecond (<0.2ms) |
-| **Domain-Aware Meta Filter** | Skips TLS padding for Meta/Instagram to avoid C++ Fizz TLS drops. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Zero |
-| **Proportional TLS Padding** | Adds dynamic +32..128B RFC 7685 padding based on ClientHello length. | ✅ Implemented | 🔶 **High** | ⚡ Negligible |
-| **Fast Inter-Fragment Delay (1-5ms)** | Triggers TSPU reassembly buffer timeout between TLS records. | ✅ Implemented | 🔶 **High** | ⏱️ 1–5ms handshake |
-| **Linux SO_REUSEPORT Multi-Worker** | Distributes socket accept loops across all CPU cores on Linux/OpenWrt. | ✅ Implemented | 🔶 **High** | ⚡ Max Throughput |
-| **TCP_NODELAY Socket Tuning** | Flushes SNI split packets immediately, overriding OS Nagle delay. | ✅ Implemented | 🟡 **Medium** | ⚡ Improves latency |
-| **Proxy Header Stripping** | Removes `Via`, `X-Forwarded-For`, `Proxy-Connection` headers. | ✅ Implemented | 🟡 **Medium** | ⚡ Zero |
-| **Out-of-Order (Disorder) TCP** | Sends TLS Record 2 before Record 1 to break stateful TSPU reassembly. | ✅ Implemented | 🔶 **High** | ⚡ Negligible |
-| **Fake Packet TTL Injection** | Sends fake benign `ClientHello` with low TTL to mislead TSPU. | ✅ Implemented | 🔶 **High** | ⏱️ +1 RTT |
-| **TCP Window Size Shrinking** | Sets TCP socket buffer window size to force micro-segmentation. | ✅ Implemented | 🟡 **Medium** | ⏱️ Minor handshake delay |
-| **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | 🚧 *Planned (Roadmap)* | 🟡 **Medium** | ⚡ Zero |
-| **HTTP CONNECT Space Insertion** | Inserts extra spaces in CONNECT requests to confuse DPI regex splitters. | 🚧 *Planned (Roadmap)* | 🟡 **Medium** | ⚡ Zero |
-| **FQDN Trailing Dot Obfuscation** | Appends trailing dot (`example.com.`) to break exact domain filters. | 🚧 *Planned (Roadmap)* | 🟡 **Medium** | ⚡ Zero |
-| **Auto HTTPS Redirection (Port 80)** | Intercepts plaintext HTTP and issues 301 redirect to encrypted HTTPS. | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⚡ Faster handshake |
-| **DNSCrypt Protocol Support** | Curve25519 authenticated UDP/TCP DNS resolution over Port 443 without TLS SNI. | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⏱️ +80-120KB binary |
+| Feature / Evasion Method | Evasion Mechanism | Implementation Status | GoodbyeDPI Equiv. | TSPU Bypass Impact | Performance Overhead |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **SNI Midpoint Record Splitting** | Cuts TLS `ClientHello` inside hostname string across 2 TLS records. | ✅ Implemented | ✅ Available (`-s`) | 🔥 **Critical (High)** | ⚡ Negligible (<1ms) |
+| **Zero-Dependency Local UDP DNS** | Queries local DNS (`127.0.0.1:53` / `dnscrypt-proxy`) with instant cache. | ✅ Implemented | ✅ Available (`--dns-addr`) | 🔥 **Critical (High)** | ⚡ Sub-millisecond (<0.2ms) |
+| **Domain-Aware Meta Filter** | Skips TLS padding for Meta/Instagram to avoid C++ Fizz TLS drops. | ✅ Implemented | ❌ N/A (Global Rules) | 🔥 **Critical (High)** | ⚡ Zero |
+| **Proportional TLS Padding** | Adds dynamic +32..128B RFC 7685 padding based on ClientHello length. | ✅ Implemented | ❌ Not Supported | 🔶 **High** | ⚡ Negligible |
+| **Fast Inter-Fragment Delay (1-5ms)** | Triggers TSPU reassembly buffer timeout between TLS records. | ✅ Implemented | ❌ Not Supported | 🔶 **High** | ⏱️ 1–5ms handshake |
+| **Linux SO_REUSEPORT Multi-Worker** | Distributes socket accept loops across all CPU cores on Linux/OpenWrt. | ✅ Implemented | ❌ N/A (Windows Only) | 🔶 **High** | ⚡ Max Throughput |
+| **TCP_NODELAY Socket Tuning** | Flushes SNI split packets immediately, overriding OS Nagle delay. | ✅ Implemented | ❌ N/A (WinDivert Layer) | 🟡 **Medium** | ⚡ Improves latency |
+| **Proxy Header Stripping** | Removes `Via`, `X-Forwarded-For`, `Proxy-Connection` headers. | ✅ Implemented | ✅ Available (`-h`) | 🟡 **Medium** | ⚡ Zero |
+| **Out-of-Order (Disorder) TCP** | Sends TLS Record 2 before Record 1 to break stateful TSPU reassembly. | ✅ Implemented | ✅ Available (`-d`) | 🔶 **High** | ⚡ Negligible |
+| **Fake Packet TTL Injection** | Sends fake benign `ClientHello` with low TTL to mislead TSPU. | ✅ Implemented | ✅ Available (`-f / --set-ttl`) | 🔶 **High** | ⏱️ +1 RTT |
+| **TCP Window Size Shrinking** | Sets TCP socket buffer window size to force micro-segmentation. | ✅ Implemented | ✅ Available (`-w`) | 🟡 **Medium** | ⏱️ Minor handshake delay |
+| **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | 🚧 *Planned (Roadmap)* | ✅ Available (`-h / -H`) | 🟡 **Medium** | ⚡ Zero |
+| **HTTP CONNECT Space Insertion** | Inserts extra spaces in CONNECT requests to confuse DPI regex splitters. | 🚧 *Planned (Roadmap)* | ✅ Available (`-e`) | 🟡 **Medium** | ⚡ Zero |
+| **FQDN Trailing Dot Obfuscation** | Appends trailing dot (`example.com.`) to break exact domain filters. | 🚧 *Planned (Roadmap)* | ✅ Available | 🟡 **Medium** | ⚡ Zero |
+| **Auto HTTPS Redirection (Port 80)** | Intercepts plaintext HTTP and issues 301 redirect to encrypted HTTPS. | 🚧 *Planned (Roadmap)* | ✅ Available (`-r`) | 🔶 **High** | ⚡ Faster handshake |
+| **DNSCrypt Protocol Support** | Curve25519 authenticated UDP/TCP DNS resolution over Port 443 without TLS SNI. | 🚧 *Planned (Roadmap)* | ❌ N/A (External) | 🔶 **High** | ⏱️ +80-120KB binary |
 
 ---
 
