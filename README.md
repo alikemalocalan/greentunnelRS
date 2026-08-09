@@ -33,9 +33,13 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 | **TCP Window Size Shrinking** | Sets TCP socket buffer window size to force micro-segmentation. | ✅ Implemented | ✅ Available (`-w`) | 🟡 **Medium** | ⏱️ Minor handshake delay |
 | **TCP Source Port Rotation** | Rotates client TCP port on socket reset/timeout to evade 4-tuple blackhole bans. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Zero |
 | **QUIC Alt-Svc Stripping** | Strips `Alt-Svc` headers to enforce TCP TLS 1.3 over censored QUIC UDP. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Zero |
-| **Active Probing Defense** | Rejects ISP scanner bot probes attempting to fingerprint the proxy server. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⚡ Zero |
+| **Post-Quantum TLS 1.3 (ML-KEM)** | Supports hybrid ML-KEM-768 Kyber KeyShare extensions to defeat quantum & PQC-aware DPI. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Zero |
+| **Dynamic JA4 Randomization** | Randomizes TLS extension ordering and cipher suites to frustrate JA3/JA4 fingerprinting. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⚡ Zero |
+| **UDP-over-TCP (UoT) Mode** | Encapsulates UDP frames inside length-prefixed TCP streams when UDP is blocked. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Negligible |
+| **Active Probing Fallback Target** | Proxies unauthorized ISP scanner bot probes to a local web server (Nginx/404). | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⚡ Zero |
 | **TLS Extension Permutation** | Randomizes TLS extension ordering to prevent static client fingerprinting. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⚡ Zero |
 | **DNS Type 65 Filtering** | Filters malicious DNS `HTTPS` (type 65) records injected by ISP DNS poisoning. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⚡ Zero |
+| **Statistical Traffic Masking** | Transmits low-volume background noise to multiple CDN IPs to confuse flow frequency analyzers. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⏱️ <11 Kbps noise |
 | **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | 🚧 *Planned (Roadmap)* | ✅ Available (`-h / -H`) | 🟡 **Medium** | ⚡ Zero |
 | **HTTP CONNECT Space Insertion** | Inserts extra spaces in CONNECT requests to confuse DPI regex splitters. | 🚧 *Planned (Roadmap)* | ✅ Available (`-e`) | 🟡 **Medium** | ⚡ Zero |
 | **FQDN Trailing Dot Obfuscation** | Appends trailing dot (`example.com.`) to break exact domain filters. | 🚧 *Planned (Roadmap)* | ✅ Available | 🟡 **Medium** | ⚡ Zero |

@@ -98,6 +98,26 @@ The censorship system operates directly at the ISP level using centralized **TSP
     - **How it works:** Randomizes the ordering of TLS extensions (`supported_groups`, `key_share`, `ALPN`) in padded `ClientHello` payloads.
     - **DPI Impact:** Prevents DPI systems from creating static client fingerprints.
 
+14. **Statistical Traffic Masking (Background Noise Obfuscation) *(Roadmap)*** [sivpn]
+    - **How it works:** Transmits low-overhead (11 Kbps) dummy background probe packets to multiple benign global CDN IP addresses outside the tunnel.
+    - **DPI Impact:** Frustrates ISP flow-frequency statistical analyzers trying to identify proxy IP endpoints by traffic volume correlation.
+
+15. **UDP-over-TCP (UoT) Transport Mode *(Roadmap)*** [ostp]
+    - **How it works:** Encapsulates UDP/DNS datagrams inside length-prefixed stream framing over plain TCP connections.
+    - **DPI Impact:** Bypasses ISP middleboxes that block UDP port 443 or enforce total UDP drop policies on mobile networks.
+
+16. **Active Probing Fallback Target / Web Server Mimicry *(Roadmap)*** [ostp]
+    - **How it works:** Transparently proxies unauthorized ISP scanner bot active probes to Nginx/Caddy or a local 404 HTML server.
+    - **DPI Impact:** Renders the proxy server completely indistinguishable from a standard benign web server during ISP active probe scans.
+
+17. **Post-Quantum TLS 1.3 Key Exchange Readiness (ML-KEM-768) *(Roadmap)*** [qeli]
+    - **How it works:** Supports Post-Quantum hybrid `KeyShare` extensions (`0x11ec` / ML-KEM-768 Kyber) in padded `ClientHello` headers.
+    - **DPI Impact:** Prevents DPI devices from flagging connections lacking post-quantum extensions and future-proofs against quantum decryption.
+
+18. **Dynamic JA4 TLS Fingerprint Randomization *(Roadmap)*** [zapret2 / net4people]
+    - **How it works:** Dynamically shuffles TLS Extension ordering (`key_share`, `supported_groups`, `ALPN`), cipher suites, and padding offsets on every new connection.
+    - **DPI Impact:** Frustrates heuristic JA3/JA4 fingerprinting engines by generating a unique client TLS signature per connection.
+
 ---
 
 ## 3. Implementation & Impact Rating Table (Uygulama ve Etki Derecesi Tablosu)
@@ -117,10 +137,13 @@ The censorship system operates directly at the ISP level using centralized **TSP
 | **TCP Window Size Shrinking** | Sets TCP socket buffer window size to force micro-segmentation. | ✅ Implemented | 🟡 **Medium** | ⏱️ Minor handshake delay |
 | **TCP Source Port Rotation** | Rotates client TCP port on socket reset/timeout to evade 4-tuple blackhole bans. | 🚧 *Planned (Roadmap)* | 🔥 **Critical (High)** | ⚡ Zero |
 | **QUIC Alt-Svc Stripping** | Strips `Alt-Svc` headers to enforce TCP TLS 1.3 over censored QUIC UDP. | 🚧 *Planned (Roadmap)* | 🔥 **Critical (High)** | ⚡ Zero |
-| **Active Probing Defense** | Rejects ISP scanner bot probes attempting to fingerprint the proxy server. | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⚡ Zero |
+| **Post-Quantum TLS 1.3 (ML-KEM)** | Supports hybrid ML-KEM-768 Kyber KeyShare extensions to defeat quantum & PQC-aware DPI. | 🚧 *Planned (Roadmap)* | 🔥 **Critical (High)** | ⚡ Zero |
+| **Dynamic JA4 Randomization** | Randomizes TLS extension ordering and cipher suites to frustrate JA3/JA4 fingerprinting. | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⚡ Zero |
+| **UDP-over-TCP (UoT) Mode** | Encapsulates UDP frames inside length-prefixed TCP streams when UDP is blocked. | 🚧 *Planned (Roadmap)* | 🔥 **Critical (High)** | ⚡ Negligible |
+| **Active Probing Fallback Target** | Proxies unauthorized ISP scanner bot probes to a local web server (Nginx/404). | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⚡ Zero |
 | **TLS Extension Permutation** | Randomizes TLS extension ordering to prevent static client fingerprinting. | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⚡ Zero |
+| **Statistical Traffic Masking** | Transmits low-volume background noise to multiple CDN IPs to confuse flow frequency analyzers. | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⏱️ <11 Kbps noise |
 | **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | 🚧 *Planned (Roadmap)* | 🟡 **Medium** | ⚡ Zero |
 | **HTTP CONNECT Space Insertion** | Inserts extra spaces in CONNECT requests to confuse DPI regex splitters. | 🚧 *Planned (Roadmap)* | 🟡 **Medium** | ⚡ Zero |
 | **FQDN Trailing Dot Obfuscation** | Appends trailing dot (`example.com.`) to break exact domain filters. | 🚧 *Planned (Roadmap)* | 🟡 **Medium** | ⚡ Zero |
-| **Auto HTTPS Redirection (Port 80)** | Intercepts plaintext HTTP and issues 301 redirect to encrypted HTTPS. | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⚡ Faster handshake |
 | **DNSCrypt Protocol Support** | Curve25519 authenticated UDP/TCP DNS resolution over Port 443 without TLS SNI. | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⏱️ +80-120KB binary |
