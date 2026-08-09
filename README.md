@@ -1,6 +1,7 @@
 # GreenTunnel Rust CLI
 
-High-performance, lightweight anti-censorship DPI bypass HTTP/HTTPS proxy written in Rust with zero GUI overhead — designed for Linux servers, macOS, Windows, and OpenWrt routers.
+Ultra-fast, zero-dependency anti-censorship DPI bypass HTTP/HTTPS proxy written in Rust.  
+Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, macOS, and Windows. Operates at **Layer 4/7** with SNI midpoint record splitting, RFC 7685 ClientHello padding, and multi-core CPU scaling in an **ultra-small binary size (~748 KB)**.
 
 ---
 
@@ -35,6 +36,19 @@ High-performance, lightweight anti-censorship DPI bypass HTTP/HTTPS proxy writte
 | **FQDN Trailing Dot Obfuscation** | Appends trailing dot (`example.com.`) to break exact domain filters. | 🚧 *Planned (Roadmap)* | ✅ Available | 🟡 **Medium** | ⚡ Zero |
 | **Auto HTTPS Redirection (Port 80)** | Intercepts plaintext HTTP and issues 301 redirect to encrypted HTTPS. | 🚧 *Planned (Roadmap)* | ✅ Available (`-r`) | 🔶 **High** | ⚡ Faster handshake |
 | **DNSCrypt Protocol Support** | Curve25519 authenticated UDP/TCP DNS resolution over Port 443 without TLS SNI. | 🚧 *Planned (Roadmap)* | ❌ N/A (External) | 🔶 **High** | ⏱️ +80-120KB binary |
+
+---
+
+## Architectural Comparison: greentunnelRS vs. GoodbyeDPI
+
+| Architectural Aspect | GoodbyeDPI | greentunnelRS |
+| :--- | :--- | :--- |
+| **Operating Layer** | **Layer 3 / 4 (Network & Transport)** — Operates as a kernel-level packet filter (WinDivert driver). | **Layer 4 / 7 (Transport & Application)** — Operates as an intelligent user-space proxy server. |
+| **OS Compatibility** | 🪟 **Windows Only** (requires WinDivert kernel driver). | 🐧 **Cross-Platform** (OpenWrt routers, Linux servers, macOS, Windows). |
+| **TLS Protocol Awareness** | Reads raw TCP bytes without deep TLS record parsing. | Parses Layer 7 `ClientHello` structures, applies RFC 7685 padding, and cuts SNI hostnames dynamically. |
+| **Domain-Specific Filtering** | Applies global packet manipulation rules to all TCP traffic. | Detects target domains (e.g., Meta/Instagram Fizz TLS bypass) and adjusts padding rules automatically. |
+| **CPU Scaling** | Single-threaded packet interception via WinDivert driver loop. | Linux `SO_REUSEPORT` multi-worker pool scaling across all CPU cores (e.g., dual/quad-core OpenWrt routers). |
+| **Setup Overhead** | Requires Administrator / Kernel Driver installation on Windows. | Zero driver installation; runs as a portable standalone binary (~748 KB). |
 
 ---
 
