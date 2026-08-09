@@ -17,14 +17,10 @@ path = "src/main.rs"
 
 [dependencies]
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "io-util", "time", "macros", "sync"] }
-rustls = { version = "0.23.43", features = ["ring", "std"], default-features = false }
-tokio-rustls = { version = "0.26.4", features = ["ring"], default-features = false }
 tracing = { version = "0.1.44", features = ["std"], default-features = false }
 rand = "0.10.2"
 anyhow = "1.0.104"
 socket2 = "0.6.5"
-webpki-roots = "1.0.9"
-libc = "0.2.189"
 
 [profile.dev]
 opt-level = 0
@@ -41,7 +37,7 @@ panic = "abort"
 strip = true
 
 [lints.rust]
-unsafe_code = "allow"
+unsafe_code = "forbid"
 unused_must_use = "warn"
 
 [lints.clippy]

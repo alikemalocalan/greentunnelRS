@@ -10,10 +10,6 @@ use std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Install ring as default Rustls crypto provider
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
 
     let cli = Cli::parse();
 

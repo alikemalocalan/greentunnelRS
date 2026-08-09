@@ -1,2 +1,3 @@
-pub mod doh;
-pub use doh::*;
+pub mod resolver;
+
+pub use resolver::*;

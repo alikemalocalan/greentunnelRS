@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::dns::DohResolver;
+use crate::dns::DnsResolver;
 use crate::tls::{
     find_sni_info, fragment_at_offset, is_client_hello, pad, DEFAULT_TARGET_SIZE,
     TLS_RECORD_HEADER_SIZE,
@@ -27,7 +27,7 @@ pub async fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
     let num_workers = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(2);
-    let resolver = Arc::new(DohResolver::new(&config.doh_url));
+    let resolver = Arc::new(DnsResolver::new(&config.doh_url));
     let config = Arc::new(config);
 
     tracing::info!(
@@ -63,7 +63,7 @@ pub async fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
 
 async fn run_worker_listener(
     worker_id: usize,
-    resolver: Arc<DohResolver>,
+    resolver: Arc<DnsResolver>,
     config: Arc<ProxyServerConfig>,
 ) -> anyhow::Result<()> {
     let domain = if config.bind_addr.is_ipv6() {
@@ -107,7 +107,7 @@ async fn run_worker_listener(
 async fn handle_client(
     mut client: TcpStream,
     _client_addr: SocketAddr,
-    resolver: Arc<DohResolver>,
+    resolver: Arc<DnsResolver>,
     config: Arc<ProxyServerConfig>,
 ) -> anyhow::Result<()> {
     // Enable TCP_NODELAY on client socket to eliminate Linux 40ms Nagle delay during HTTP CONNECT handshake

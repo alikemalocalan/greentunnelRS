@@ -20,7 +20,7 @@ impl Parser for Cli {
         let mut port = 8080;
         let mut bind = "127.0.0.1".to_string();
         let mut aggressive = false;
-        let mut doh_url = "https://dns.google/resolve".to_string();
+        let mut doh_url = "127.0.0.1:53".to_string();
         let mut verbose = false;
         let mut disorder = false;
         let mut fake_ttl = 0;
@@ -117,7 +117,7 @@ Options:
   -F, --fake-ttl <TTL>          Inject fake ClientHello with specified TTL (0 = disabled)
       --fake-sni <DOMAIN>       Benign domain name for fake ClientHello injection [default: google.com]
   -W, --window-shrink <BYTES>   Restrict TCP socket buffer window size (0 = disabled)
-  -d, --doh-url <URL>           DoH/DoT provider endpoint URL [default: https://dns.google/resolve]
+  -d, --doh-url <IP:PORT>       DNS resolver server IP:port [default: 127.0.0.1:53]
   -v, --verbose                 Enable verbose debug log output
   -h, --help                    Print help information
   -V, --version                 Print version information"#
