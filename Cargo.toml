@@ -24,6 +24,7 @@ rand = "0.10.2"
 anyhow = "1.0.104"
 socket2 = "0.6.5"
 webpki-roots = "1.0.9"
+libc = "0.2.189"
 
 [profile.dev]
 opt-level = 0
@@ -40,7 +41,7 @@ panic = "abort"
 strip = true
 
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "allow"
 unused_must_use = "warn"
 
 [lints.clippy]
