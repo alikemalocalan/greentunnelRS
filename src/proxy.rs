@@ -24,6 +24,48 @@ pub struct ProxyServerConfig {
 }
 
 pub async fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
+    let num_workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(2);
+    let resolver = Arc::new(DohResolver::new(&config.doh_url));
+    let config = Arc::new(config);
+
+    tracing::info!(
+        "GreenTunnel Rust Proxy running on http://{} with {} CPU worker threads (AggressiveMode: {}, Disorder: {}, FakeTTL: {}, WindowShrink: {})",
+        config.bind_addr,
+        num_workers,
+        config.aggressive_mode,
+        config.disorder_mode,
+        config.fake_ttl,
+        config.window_shrink
+    );
+
+    let mut handles = Vec::with_capacity(num_workers);
+
+    for worker_id in 0..num_workers {
+        let resolver = Arc::clone(&resolver);
+        let config = Arc::clone(&config);
+
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_worker_listener(worker_id, resolver, config).await {
+                tracing::error!("Worker {} listener error: {}", worker_id, e);
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    Ok(())
+}
+
+async fn run_worker_listener(
+    worker_id: usize,
+    resolver: Arc<DohResolver>,
+    config: Arc<ProxyServerConfig>,
+) -> anyhow::Result<()> {
     let domain = if config.bind_addr.is_ipv6() {
         socket2::Domain::IPV6
     } else {
@@ -40,23 +82,13 @@ pub async fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
     let std_listener: std::net::TcpListener = socket.into();
     let listener = TcpListener::from_std(std_listener)?;
 
-    tracing::info!(
-        "GreenTunnel Rust Proxy running on http://{} (AggressiveMode: {}, Disorder: {}, FakeTTL: {}, WindowShrink: {})",
-        config.bind_addr,
-        config.aggressive_mode,
-        config.disorder_mode,
-        config.fake_ttl,
-        config.window_shrink
-    );
-
-    let resolver = Arc::new(DohResolver::new(&config.doh_url));
-    let config = Arc::new(config);
+    tracing::debug!("Worker thread {} listening on http://{}", worker_id, config.bind_addr);
 
     loop {
         let (client_stream, client_addr) = match listener.accept().await {
             Ok(val) => val,
             Err(e) => {
-                tracing::error!("Accept error: {}", e);
+                tracing::error!("Worker {} accept error: {}", worker_id, e);
                 continue;
             }
         };
