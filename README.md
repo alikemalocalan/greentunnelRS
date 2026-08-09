@@ -31,6 +31,11 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 | **Out-of-Order (Disorder) TCP** | Sends TLS Record 2 before Record 1 to break stateful TSPU reassembly. | ✅ Implemented | ✅ Available (`-d`) | 🔶 **High** | ⚡ Negligible |
 | **Fake Packet TTL Injection** | Sends fake benign `ClientHello` with low TTL to mislead TSPU. | ✅ Implemented | ✅ Available (`-f / --set-ttl`) | 🔶 **High** | ⏱️ +1 RTT |
 | **TCP Window Size Shrinking** | Sets TCP socket buffer window size to force micro-segmentation. | ✅ Implemented | ✅ Available (`-w`) | 🟡 **Medium** | ⏱️ Minor handshake delay |
+| **TCP Source Port Rotation** | Rotates client TCP port on socket reset/timeout to evade 4-tuple blackhole bans. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Zero |
+| **QUIC Alt-Svc Stripping** | Strips `Alt-Svc` headers to enforce TCP TLS 1.3 over censored QUIC UDP. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Zero |
+| **Active Probing Defense** | Rejects ISP scanner bot probes attempting to fingerprint the proxy server. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⚡ Zero |
+| **TLS Extension Permutation** | Randomizes TLS extension ordering to prevent static client fingerprinting. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⚡ Zero |
+| **DNS Type 65 Filtering** | Filters malicious DNS `HTTPS` (type 65) records injected by ISP DNS poisoning. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⚡ Zero |
 | **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | 🚧 *Planned (Roadmap)* | ✅ Available (`-h / -H`) | 🟡 **Medium** | ⚡ Zero |
 | **HTTP CONNECT Space Insertion** | Inserts extra spaces in CONNECT requests to confuse DPI regex splitters. | 🚧 *Planned (Roadmap)* | ✅ Available (`-e`) | 🟡 **Medium** | ⚡ Zero |
 | **FQDN Trailing Dot Obfuscation** | Appends trailing dot (`example.com.`) to break exact domain filters. | 🚧 *Planned (Roadmap)* | ✅ Available | 🟡 **Medium** | ⚡ Zero |
