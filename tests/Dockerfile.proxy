@@ -1,0 +1,50 @@
+# ==============================================================================
+# Stage 1: Build greentunnelRS Rust binary
+# ==============================================================================
+FROM rust:latest AS builder
+
+WORKDIR /usr/src/greentunnelRS
+
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build --release && rm -rf src
+
+COPY src ./src
+RUN touch src/main.rs && cargo build --release
+
+# ==============================================================================
+# Stage 2: Russia Proxy Runtime (OpenVPN + greentunnelRS)
+# ==============================================================================
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openvpn \
+    curl \
+    ca-certificates \
+    iproute2 \
+    net-tools \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /usr/src/greentunnelRS/target/release/greentunnelRS /usr/local/bin/greentunnelRS
+
+# Download OVPN config at build time (can be overridden at runtime via OVPN_URL env)
+ARG OVPN_URL
+RUN if [ -n "$OVPN_URL" ]; then \
+        curl -s -f "$OVPN_URL" -o /app/openvpn.ovpn; \
+    else \
+        echo "# placeholder — set OVPN_URL env at runtime" > /app/openvpn.ovpn; \
+    fi
+
+COPY tests/proxy_entrypoint.sh /app/proxy_entrypoint.sh
+RUN chmod +x /app/proxy_entrypoint.sh
+
+ENV OVPN_CONFIG=/app/openvpn.ovpn
+ENV PROXY_PORT=8080
+
+EXPOSE 8080
+
+CMD ["/app/proxy_entrypoint.sh"]
