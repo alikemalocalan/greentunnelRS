@@ -82,21 +82,21 @@ The censorship system operates directly at the ISP level using centralized **TSP
 9. **HTTP Header Cleansing & Case Obfuscation**
    - **How it works:** Strips proxy tracking headers (`Via`, `X-Forwarded-For`, `Proxy-Authorization`) and normalizes plaintext HTTP headers.
 
-10. **TCP Source Port Rotation (4-Tuple Ban Evasion) *(Roadmap)***
-    - **How it works:** Instantly rotates client source TCP port upon socket reset/timeout.
-    - **DPI Impact:** Evades TSPU 420-second (7-minute) IP:Port 4-tuple blackhole drop lists.
+10. **TCP Source Port Rotation (4-Tuple Ban Evasion)**
+    - **How it works:** Instantly rotates client source TCP port upon socket connection.
+    - **DPI Impact:** Evades TSPU 420-second (7-minute) IP:Port 4-tuple blackhole drop lists (`-R` / `--port-rotate`).
 
-11. **QUIC Alt-Svc Header Stripping *(Roadmap)***
+11. **QUIC Alt-Svc Header Stripping**
     - **How it works:** Strips `Alt-Svc: h3=":443"` headers from HTTP responses.
-    - **DPI Impact:** Forces browsers to stay on TCP TLS 1.3 where SNI midpoint record splitting is 100% effective, bypassing QUIC UDP SNI filters.
+    - **DPI Impact:** Forces browsers to stay on TCP TLS 1.3 where SNI midpoint record splitting is 100% effective, bypassing QUIC UDP SNI filters (`-s` / `--strip-alt-svc`).
 
 12. **Active Probing Scanner Defense *(Roadmap)***
     - **How it works:** Validates incoming proxy requests and drops non-proxy probe packets from ISP scanner bots.
     - **DPI Impact:** Prevents ISP middleboxes from actively probing and fingerprinting the proxy server.
 
-13. **TLS Extension Permutation *(Roadmap)***
-    - **How it works:** Randomizes the ordering of TLS extensions (`supported_groups`, `key_share`, `ALPN`) in padded `ClientHello` payloads.
-    - **DPI Impact:** Prevents DPI systems from creating static client fingerprints.
+13. **TLS Extension Permutation (Dynamic JA4 Randomization)**
+    - **How it works:** Randomizes the ordering of TLS extensions (`supported_groups`, `key_share`, `ALPN`, `padding`) in `ClientHello` payloads.
+    - **DPI Impact:** Prevents DPI systems from creating static client fingerprints (`-J` / `--ja4-permute`).
 
 14. **Statistical Traffic Masking (Background Noise Obfuscation) *(Roadmap)*** [sivpn]
     - **How it works:** Transmits low-overhead (11 Kbps) dummy background probe packets to multiple benign global CDN IP addresses outside the tunnel.
@@ -113,10 +113,6 @@ The censorship system operates directly at the ISP level using centralized **TSP
 17. **Post-Quantum TLS 1.3 Key Exchange Readiness (ML-KEM-768) *(Roadmap)*** [qeli]
     - **How it works:** Supports Post-Quantum hybrid `KeyShare` extensions (`0x11ec` / ML-KEM-768 Kyber) in padded `ClientHello` headers.
     - **DPI Impact:** Prevents DPI devices from flagging connections lacking post-quantum extensions and future-proofs against quantum decryption.
-
-18. **Dynamic JA4 TLS Fingerprint Randomization *(Roadmap)*** [zapret2 / net4people]
-    - **How it works:** Dynamically shuffles TLS Extension ordering (`key_share`, `supported_groups`, `ALPN`), cipher suites, and padding offsets on every new connection.
-    - **DPI Impact:** Frustrates heuristic JA3/JA4 fingerprinting engines by generating a unique client TLS signature per connection.
 
 ---
 
@@ -135,13 +131,13 @@ The censorship system operates directly at the ISP level using centralized **TSP
 | **Out-of-Order (Disorder) TCP** | Sends TLS Record 2 before Record 1 to break stateful TSPU reassembly. | ✅ Implemented | 🔶 **High** | ⚡ Negligible |
 | **Fake Packet TTL Injection** | Sends fake benign `ClientHello` with low TTL to mislead TSPU. | ✅ Implemented | 🔶 **High** | ⏱️ +1 RTT |
 | **TCP Window Size Shrinking** | Sets TCP socket buffer window size to force micro-segmentation. | ✅ Implemented | 🟡 **Medium** | ⏱️ Minor handshake delay |
-| **TCP Source Port Rotation** | Rotates client TCP port on socket reset/timeout to evade 4-tuple blackhole bans. | 🚧 *Planned (Roadmap)* | 🔥 **Critical (High)** | ⚡ Zero |
-| **QUIC Alt-Svc Stripping** | Strips `Alt-Svc` headers to enforce TCP TLS 1.3 over censored QUIC UDP. | 🚧 *Planned (Roadmap)* | 🔥 **Critical (High)** | ⚡ Zero |
+| **TCP Source Port Rotation** | Rotates client TCP port on socket connection to evade 4-tuple blackhole bans. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Zero |
+| **QUIC Alt-Svc Stripping** | Strips `Alt-Svc` headers to enforce TCP TLS 1.3 over censored QUIC UDP. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Zero |
 | **Post-Quantum TLS 1.3 (ML-KEM)** | Supports hybrid ML-KEM-768 Kyber KeyShare extensions to defeat quantum & PQC-aware DPI. | 🚧 *Planned (Roadmap)* | 🔥 **Critical (High)** | ⚡ Zero |
-| **Dynamic JA4 Randomization** | Randomizes TLS extension ordering and cipher suites to frustrate JA3/JA4 fingerprinting. | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⚡ Zero |
+| **Dynamic JA4 Randomization** | Randomizes TLS ClientHello extension ordering to frustrate JA3/JA4 fingerprinting. | ✅ Implemented | 🔶 **High** | ⚡ Zero |
 | **UDP-over-TCP (UoT) Mode** | Encapsulates UDP frames inside length-prefixed TCP streams when UDP is blocked. | 🚧 *Planned (Roadmap)* | 🔥 **Critical (High)** | ⚡ Negligible |
 | **Active Probing Fallback Target** | Proxies unauthorized ISP scanner bot probes to a local web server (Nginx/404). | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⚡ Zero |
-| **TLS Extension Permutation** | Randomizes TLS extension ordering to prevent static client fingerprinting. | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⚡ Zero |
+| **TLS Extension Permutation** | Randomizes TLS ClientHello extension ordering to prevent static client fingerprinting. | ✅ Implemented | 🔶 **High** | ⚡ Zero |
 | **Statistical Traffic Masking** | Transmits low-volume background noise to multiple CDN IPs to confuse flow frequency analyzers. | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⏱️ <11 Kbps noise |
 | **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | ✅ Implemented | 🟡 **Medium** | ⚡ Zero |
 | **HTTP CONNECT Space Insertion** | Inserts extra spaces in CONNECT requests to confuse DPI regex splitters. | ✅ Implemented | 🟡 **Medium** | ⚡ Zero |

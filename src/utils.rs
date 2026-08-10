@@ -175,6 +175,7 @@ pub fn preprocess_http_request(request_str: &str, http_space: bool, mix_header_c
 }
 
 /// Strips Alt-Svc / alt-svc headers from an HTTP response header block to prevent browsers from switching to censored QUIC UDP traffic.
+#[allow(dead_code)]
 pub fn strip_alt_svc_headers(response_str: &str) -> String {
     let mut lines = Vec::new();
     for line in response_str.lines() {
