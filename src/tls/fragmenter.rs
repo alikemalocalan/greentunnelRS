@@ -10,8 +10,9 @@ pub fn fragment_at_offset(data: &[u8], absolute_split_offset: usize) -> Vec<Vec<
     }
 
     let content_type = data[0];
-    let version_major = data[1];
-    let version_minor = data[2];
+    // RFC 8446 Section 5.1: TLS 1.3 outer record layer headers MUST use legacy_record_version 0x0301 (TLS 1.0)
+    let version_major = 0x03;
+    let version_minor = 0x01;
 
     let payload1 = &data[TLS_RECORD_HEADER_SIZE..absolute_split_offset];
     let payload2 = &data[absolute_split_offset..];

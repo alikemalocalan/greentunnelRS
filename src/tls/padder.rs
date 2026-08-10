@@ -1,7 +1,62 @@
 use super::parser::{find_extensions_length_offset, is_client_hello, read_u16, TLS_RECORD_HEADER_SIZE};
 
 pub const PADDING_EXTENSION_TYPE: u16 = 0x0015;
+pub const PRE_SHARED_KEY_EXTENSION_TYPE: u16 = 0x0029;
+pub const SUPPORTED_GROUPS_EXTENSION_TYPE: u16 = 0x000a;
+pub const KEY_SHARE_EXTENSION_TYPE: u16 = 0x0033;
 pub const DEFAULT_TARGET_SIZE: usize = 512;
+pub const POST_QUANTUM_GROUP_X25519_MLKEM768: u16 = 0x11ec;
+
+/// Robustly checks if a TLS ClientHello contains Post-Quantum hybrid key exchange / group (e.g. X25519_MLKEM768 0x11ec).
+/// Safely parses TLV extensions (`supported_groups` 0x000a or `key_share` 0x0033) without panicking.
+pub fn has_post_quantum_extension(data: &[u8]) -> bool {
+    if !is_client_hello(data) {
+        return false;
+    }
+
+    let ext_len_offset = match find_extensions_length_offset(data) {
+        Some(offset) => offset,
+        None => return false,
+    };
+
+    let ext_len = match read_u16(data, ext_len_offset) {
+        Some(len) => len as usize,
+        None => return false,
+    };
+
+    let mut pos = ext_len_offset + 2;
+    let end = (pos + ext_len).min(data.len());
+
+    while pos + 4 <= end {
+        let ext_type = match read_u16(data, pos) {
+            Some(t) => t,
+            None => return false,
+        };
+        let ext_data_len = match read_u16(data, pos + 2) {
+            Some(l) => l as usize,
+            None => return false,
+        };
+        let ext_end = pos + 4 + ext_data_len;
+        if ext_end > end {
+            break;
+        }
+
+        let ext_payload = &data[pos + 4..ext_end];
+
+        if ext_type == SUPPORTED_GROUPS_EXTENSION_TYPE || ext_type == KEY_SHARE_EXTENSION_TYPE {
+            if ext_payload
+                .chunks_exact(2)
+                .any(|c| u16::from_be_bytes([c[0], c[1]]) == POST_QUANTUM_GROUP_X25519_MLKEM768)
+            {
+                return true;
+            }
+        }
+
+        pos = ext_end;
+    }
+
+    false
+}
 
 /// Pads a TLS ClientHello byte slice to `target_size` bytes using TLS Padding Extension (0x0015).
 ///
@@ -9,7 +64,7 @@ pub const DEFAULT_TARGET_SIZE: usize = 512;
 /// - Data is not a valid ClientHello
 /// - Padding extension (0x0015) already exists
 /// - ClientHello size is already >= `target_size`
-pub fn pad(data: &[u8], target_size: usize) -> Vec<u8> {
+pub fn pad_client_hello(data: &[u8], target_size: usize) -> Vec<u8> {
     if !is_client_hello(data) {
         return data.to_vec();
     }
@@ -33,8 +88,7 @@ pub fn pad(data: &[u8], target_size: usize) -> Vec<u8> {
 
     // Calculate proportional target size for ClientHello records.
     // Avoid inflating tiny ClientHellos (e.g. 163B) with massive padding (>50% of packet size),
-    // because strict L7 load balancers (like Meta Proxygen on i.instagram.com) drop ClientHellos
-    // where padding extension payload exceeds the ClientHello body size.
+    // because strict L7 load balancers drop ClientHellos where padding payload exceeds the body size.
     let max_padding_for_record = (record_data.len() / 2).clamp(32, 128);
     let target_for_record = record_data.len() + max_padding_for_record;
 
@@ -102,7 +156,7 @@ pub fn pad(data: &[u8], target_size: usize) -> Vec<u8> {
     padded[ext_len_offset + 1] = (new_ext_len & 0xFF) as u8;
 
     tracing::info!(
-        "Aggressive Mode (Rust): Padded ClientHello from {} to {} bytes (+{} padding bytes)",
+        "TLS Padding (Rust): Padded ClientHello from {} to {} bytes (+{} padding bytes)",
         record_data.len(),
         padded.len(),
         padding_needed
@@ -145,6 +199,7 @@ fn has_padding_extension(data: &[u8]) -> bool {
 }
 
 /// Randomly permutes (shuffles) non-positional TLS ClientHello extensions to frustrate JA3/JA4 fingerprinting.
+/// Positional extensions like `pre_shared_key` (0x0029) and `padding` (0x0015) are strictly kept at the end per RFC 8446.
 pub fn permute_tls_extensions(data: &[u8]) -> Vec<u8> {
     if !is_client_hello(data) {
         return data.to_vec();
@@ -166,9 +221,14 @@ pub fn permute_tls_extensions(data: &[u8]) -> Vec<u8> {
         return data.to_vec();
     }
 
-    // Extract individual extension slices
-    let mut extensions: Vec<&[u8]> = Vec::new();
+    let mut normal_extensions: Vec<&[u8]> = Vec::new();
+    let mut trailing_extensions: Vec<&[u8]> = Vec::new();
+
     while pos + 4 <= end {
+        let ext_type = match read_u16(data, pos) {
+            Some(t) => t,
+            None => break,
+        };
         let ext_data_len = match read_u16(data, pos + 2) {
             Some(l) => l as usize,
             None => break,
@@ -177,24 +237,42 @@ pub fn permute_tls_extensions(data: &[u8]) -> Vec<u8> {
         if pos + ext_total_len > end {
             break;
         }
-        extensions.push(&data[pos..pos + ext_total_len]);
+
+        let ext_slice = &data[pos..pos + ext_total_len];
+
+        // RFC 8446 Sec 4.2.11: pre_shared_key (0x0029) MUST be the last extension in ClientHello.
+        // RFC 7685: padding (0x0015) MUST be at the end.
+        if ext_type == PRE_SHARED_KEY_EXTENSION_TYPE || ext_type == PADDING_EXTENSION_TYPE {
+            trailing_extensions.push(ext_slice);
+        } else {
+            normal_extensions.push(ext_slice);
+        }
+
         pos += ext_total_len;
     }
 
-    if extensions.len() < 2 {
+    // Abort permutation if parsing did not cleanly reach the exact end of extensions block
+    if pos != end {
         return data.to_vec();
     }
 
-    // Fisher-Yates shuffle extensions
-    for i in (1..extensions.len()).rev() {
-        let j = rand::random_range(0..=i);
-        extensions.swap(i, j);
+    if normal_extensions.len() < 2 {
+        return data.to_vec();
     }
 
-    // Reconstruct ClientHello with permuted extensions
+    // Fisher-Yates shuffle ONLY non-positional normal extensions
+    for i in (1..normal_extensions.len()).rev() {
+        let j = rand::random_range(0..=i);
+        normal_extensions.swap(i, j);
+    }
+
+    // Reconstruct ClientHello: header + normal shuffled extensions + RFC-mandated trailing extensions + rest of payload
     let mut result = Vec::with_capacity(data.len());
     result.extend_from_slice(&data[..ext_len_offset + 2]);
-    for ext in extensions {
+    for ext in normal_extensions {
+        result.extend_from_slice(ext);
+    }
+    for ext in trailing_extensions {
         result.extend_from_slice(ext);
     }
     if data.len() > end {
@@ -214,7 +292,7 @@ mod tests {
         let original = build_synthetic_client_hello(Some("example.com"), false);
         assert!(original.len() < DEFAULT_TARGET_SIZE);
 
-        let padded = pad(&original, DEFAULT_TARGET_SIZE);
+        let padded = pad_client_hello(&original, DEFAULT_TARGET_SIZE);
         assert!(padded.len() > original.len());
         assert!(has_padding_extension(&padded));
     }
@@ -222,7 +300,7 @@ mod tests {
     #[test]
     fn test_skip_padding_if_already_padded() {
         let original = build_synthetic_client_hello(Some("example.com"), true);
-        let padded = pad(&original, DEFAULT_TARGET_SIZE);
+        let padded = pad_client_hello(&original, DEFAULT_TARGET_SIZE);
         assert_eq!(original, padded);
     }
 
@@ -230,7 +308,7 @@ mod tests {
     fn test_adaptive_padding() {
         let original = build_synthetic_client_hello(Some("example.com"), false);
         let expected_pad = (original.len() / 2).clamp(32, 128);
-        let padded = pad(&original, DEFAULT_TARGET_SIZE);
+        let padded = pad_client_hello(&original, DEFAULT_TARGET_SIZE);
         assert_eq!(padded.len(), original.len() + expected_pad);
     }
 
@@ -240,7 +318,7 @@ mod tests {
         let trailing = b"EXTRA_BYTES_IN_BUFFER";
         original.extend_from_slice(trailing);
 
-        let padded = pad(&original, DEFAULT_TARGET_SIZE);
+        let padded = pad_client_hello(&original, DEFAULT_TARGET_SIZE);
         assert!(padded.ends_with(trailing));
     }
 
@@ -250,5 +328,11 @@ mod tests {
         let permuted = permute_tls_extensions(&original);
         assert_eq!(original.len(), permuted.len());
         assert!(is_client_hello(&permuted));
+    }
+
+    #[test]
+    fn test_has_post_quantum_extension() {
+        let original = build_synthetic_client_hello(Some("example.com"), false);
+        assert!(!has_post_quantum_extension(&original));
     }
 }

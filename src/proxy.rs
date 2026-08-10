@@ -5,8 +5,8 @@ use tokio::net::{TcpListener, TcpStream};
 
 use crate::dns::DnsResolver;
 use crate::tls::{
-    find_sni_info, fragment_at_offset, is_client_hello, pad, DEFAULT_TARGET_SIZE,
-    TLS_RECORD_HEADER_SIZE,
+    find_sni_info, fragment_at_offset, has_post_quantum_extension, is_client_hello,
+    pad_client_hello, DEFAULT_TARGET_SIZE, TLS_RECORD_HEADER_SIZE,
 };
 use crate::utils::{
     is_http_connect, is_padding_incompatible_domain, parse_connect_target, preprocess_http_request,
@@ -15,7 +15,7 @@ use crate::utils::{
 
 pub struct ProxyServerConfig {
     pub bind_addr: SocketAddr,
-    pub aggressive_mode: bool,
+    pub tls_padding: bool,
     pub dns_addr: String,
     pub disorder_mode: bool,
     pub fake_ttl: u32,
@@ -28,6 +28,8 @@ pub struct ProxyServerConfig {
     pub ja4_permute: bool,
     pub trailing_dot: bool,
     pub filter_type65: bool,
+    pub post_quantum: bool,
+    pub fallback_target: String,
 }
 
 pub async fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
@@ -38,10 +40,10 @@ pub async fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
     let config = Arc::new(config);
 
     tracing::info!(
-        "GreenTunnel Rust Proxy running on http://{} with {} CPU worker threads (AggressiveMode: {}, Disorder: {}, FakeTTL: {}, WindowShrink: {}, HttpSpace: {}, MixHeaderCase: {}, StripAltSvc: {}, PortRotate: {}, JA4Permute: {}, TrailingDot: {}, FilterType65: {})",
+        "GreenTunnel Rust Proxy running on http://{} with {} CPU worker threads (TLSPadding: {}, Disorder: {}, FakeTTL: {}, WindowShrink: {}, HttpSpace: {}, MixHeaderCase: {}, StripAltSvc: {}, PortRotate: {}, JA4Permute: {}, TrailingDot: {}, FilterType65: {}, PostQuantum: {}, FallbackTarget: {})",
         config.bind_addr,
         num_workers,
-        config.aggressive_mode,
+        config.tls_padding,
         config.disorder_mode,
         config.fake_ttl,
         config.window_shrink,
@@ -51,7 +53,9 @@ pub async fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
         config.port_rotate,
         config.ja4_permute,
         config.trailing_dot,
-        config.filter_type65
+        config.filter_type65,
+        config.post_quantum,
+        config.fallback_target
     );
 
     let mut handles = Vec::with_capacity(num_workers);
@@ -96,7 +100,11 @@ async fn run_worker_listener(
     let std_listener: std::net::TcpListener = socket.into();
     let listener = TcpListener::from_std(std_listener)?;
 
-    tracing::debug!("Worker thread {} listening on http://{}", worker_id, config.bind_addr);
+    tracing::debug!(
+        "Worker thread {} listening on http://{}",
+        worker_id,
+        config.bind_addr
+    );
 
     loop {
         let (client_stream, client_addr) = match listener.accept().await {
@@ -134,7 +142,8 @@ async fn handle_client(
     }
 
     let request_str = String::from_utf8_lossy(&buf[..n]);
-    let cleaned_request = preprocess_http_request(&request_str, config.http_space, config.mix_header_case);
+    let cleaned_request =
+        preprocess_http_request(&request_str, config.http_space, config.mix_header_case);
 
     if is_http_connect(&cleaned_request) {
         let (raw_host, port) = match parse_connect_target(&cleaned_request) {
@@ -215,8 +224,12 @@ async fn handle_client(
 
         // Apply TCP KeepAlive to prevent dead socket leaks on OpenWrt Linux kernel
         let keepalive = socket2::TcpKeepalive::new().with_time(std::time::Duration::from_secs(60));
-        socket2::SockRef::from(&client).set_tcp_keepalive(&keepalive).ok();
-        socket2::SockRef::from(&remote).set_tcp_keepalive(&keepalive).ok();
+        socket2::SockRef::from(&client)
+            .set_tcp_keepalive(&keepalive)
+            .ok();
+        socket2::SockRef::from(&remote)
+            .set_tcp_keepalive(&keepalive)
+            .ok();
 
         // Apply TCP Window Shrinking if configured (clamp to minimum 4096 bytes on Linux/OpenWrt to prevent TCP Zero Window stalls)
         if config.window_shrink > 0 {
@@ -239,11 +252,16 @@ async fn handle_client(
             let raw_bytes = &client_hello_buf[..hello_len];
 
             // Fake Packet TTL Injection on a separate dummy probe socket to avoid main TLS stream corruption
-            if config.fake_ttl > 0 && !is_padding_incompatible_domain(&host) && is_client_hello(raw_bytes) {
+            if config.fake_ttl > 0
+                && !config.fake_sni.is_empty()
+                && !is_padding_incompatible_domain(&host)
+                && is_client_hello(raw_bytes)
+            {
                 if let Ok(peer_addr) = remote.peer_addr() {
                     if let Ok(mut fake_stream) = TcpStream::connect(peer_addr).await {
                         fake_stream.set_ttl(config.fake_ttl).ok();
-                        let fake_hello = crate::tls::build_synthetic_client_hello(Some(&config.fake_sni), false);
+                        let fake_hello =
+                            crate::tls::build_synthetic_client_hello(Some(&config.fake_sni), false);
                         let _ = fake_stream.write_all(&fake_hello).await;
                         let _ = fake_stream.flush().await;
                         tracing::info!(
@@ -256,15 +274,29 @@ async fn handle_client(
                 }
             }
 
-            // Step 1: Aggressive Mode Connection Padding (RFC 7685)
-            // Skip padding for Meta/Facebook/Instagram domains because Meta's C++ Fizz TLS stack drops padded ClientHello records.
-            let mut bytes = if config.aggressive_mode
-                && !is_padding_incompatible_domain(&host)
-                && is_client_hello(raw_bytes)
-            {
-                pad(raw_bytes, DEFAULT_TARGET_SIZE)
+            // Separate the first TLS record (ClientHello) from any trailing buffer data
+            // Firefox and modern browsers often pipeline initial ClientHello with session tickets or application data.
+            let (raw_ch, trailing_data) = if is_client_hello(raw_bytes) {
+                let payload_len = crate::tls::read_u16(raw_bytes, 3).unwrap_or(0) as usize;
+                let rec_len = TLS_RECORD_HEADER_SIZE + payload_len;
+                if rec_len > TLS_RECORD_HEADER_SIZE && raw_bytes.len() > rec_len {
+                    (&raw_bytes[..rec_len], &raw_bytes[rec_len..])
+                } else {
+                    (raw_bytes, &[][..])
+                }
             } else {
-                raw_bytes.to_vec()
+                (raw_bytes, &[][..])
+            };
+
+            // Step 1: TLS ClientHello Padding (RFC 7685)
+            // Skip padding for Meta/Facebook/Instagram domains because Meta's C++ Fizz TLS stack drops padded ClientHello records.
+            let mut bytes = if config.tls_padding
+                && !is_padding_incompatible_domain(&host)
+                && is_client_hello(raw_ch)
+            {
+                pad_client_hello(raw_ch, DEFAULT_TARGET_SIZE)
+            } else {
+                raw_ch.to_vec()
             };
 
             // Dynamic JA4 Extension Permutation: randomize TLS extension ordering to defeat JA3/JA4 fingerprinting
@@ -272,10 +304,21 @@ async fn handle_client(
                 bytes = crate::tls::permute_tls_extensions(&bytes);
             }
 
+            if config.post_quantum && has_post_quantum_extension(raw_ch) {
+                tracing::info!(
+                    "Post-Quantum ML-KEM-768 TLS 1.3 Key Share detected for {}",
+                    host
+                );
+            }
+
             if let Some(sni_info) = find_sni_info(&bytes) {
                 if sni_info.hostname_length > 4 {
                     let cut_in_sni = if sni_info.hostname_length > 6 {
-                        let start_offset = if host.to_lowercase().starts_with("www.") { 4 } else { 0 };
+                        let start_offset = if host.to_lowercase().starts_with("www.") {
+                            4
+                        } else {
+                            0
+                        };
                         let domain_len = sni_info.hostname_length.saturating_sub(start_offset);
                         let mid = start_offset + (domain_len / 2);
                         let min_cut = (mid.saturating_sub(1)).max(start_offset + 2);
@@ -295,17 +338,25 @@ async fn handle_client(
 
                         let is_meta = is_padding_incompatible_domain(&host);
 
-                        // Send Record 1 (split SNI) with TCP micro-segmentation
-                        split_and_write(&tls_records[0], &mut remote).await?;
+                        // Send Record 1 (split SNI)
+                        remote.write_all(&tls_records[0]).await?;
+                        remote.flush().await?;
 
                         // Fast inter-fragment delay (1-5ms) to trigger DPI reassembly timeout unless Meta domain
                         if !is_meta {
                             random_delay(1, 5).await;
                         }
 
-                        // Send remaining records (Record 2) with TCP micro-segmentation
+                        // Send remaining ClientHello records (Record 2)
                         for rec in &tls_records[1..] {
-                            split_and_write(rec, &mut remote).await?;
+                            remote.write_all(rec).await?;
+                        }
+                        remote.flush().await?;
+
+                        // Send any trailing unfragmented bytes read from client buffer
+                        if !trailing_data.is_empty() {
+                            remote.write_all(trailing_data).await?;
+                            remote.flush().await?;
                         }
 
                         tracing::info!(
@@ -329,11 +380,28 @@ async fn handle_client(
 
         // Tunnel remaining bidirectional TCP stream
         tunnel_bidirectional(&mut client, &mut remote).await?;
-    } else {
+    } else if request_str.starts_with("GET ") || request_str.starts_with("POST ") {
         // Plaintext HTTP request redirect to HTTPS
+        let first_line = request_str.lines().next().unwrap_or("");
+        let target_path = first_line.split_whitespace().nth(1).unwrap_or("");
+        let host_val = target_path.strip_prefix("http://").unwrap_or(target_path);
+        let clean_host = host_val.split('/').next().unwrap_or(host_val);
+
         let response = format!(
-            "HTTP/1.1 301 Moved Permanently\r\nLocation: https://{}\r\nContent-Length: 0\r\n\r\n",
-            request_str.lines().next().unwrap_or("")
+            "HTTP/1.1 301 Moved Permanently\r\nLocation: https://{}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            clean_host
+        );
+        let _ = client.write_all(response.as_bytes()).await;
+    } else {
+        // Active Probing Scanner Defense: Serve realistic Nginx 404 HTML server banner to ISP scanner bots
+        tracing::warn!(
+            "Active probe detected from client, serving benign 404 response to mislead ISP scanner"
+        );
+        let html_body = "<html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n";
+        let response = format!(
+            "HTTP/1.1 404 Not Found\r\nServer: nginx\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            html_body.len(),
+            html_body
         );
         let _ = client.write_all(response.as_bytes()).await;
     }
@@ -341,7 +409,10 @@ async fn handle_client(
     Ok(())
 }
 
-async fn tunnel_bidirectional(client: &mut TcpStream, remote: &mut TcpStream) -> anyhow::Result<()> {
+async fn tunnel_bidirectional(
+    client: &mut TcpStream,
+    remote: &mut TcpStream,
+) -> anyhow::Result<()> {
     tokio::io::copy_bidirectional(client, remote).await?;
     Ok(())
 }

@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
 
     let config = ProxyServerConfig {
         bind_addr,
-        aggressive_mode: cli.aggressive,
+        tls_padding: cli.tls_padding,
         dns_addr: cli.dns_addr,
         disorder_mode: cli.disorder,
         fake_ttl: cli.fake_ttl,
@@ -46,6 +46,8 @@ async fn main() -> anyhow::Result<()> {
         ja4_permute: cli.ja4_permute,
         trailing_dot: cli.trailing_dot,
         filter_type65: cli.filter_type65,
+        post_quantum: cli.post_quantum,
+        fallback_target: cli.fallback_target,
     };
 
     run_server(config).await?;

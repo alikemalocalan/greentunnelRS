@@ -32,18 +32,17 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 | **Fake Packet TTL Injection** | Sends fake benign `ClientHello` with low TTL to mislead TSPU. | ✅ Implemented | ✅ Available (`-f / --set-ttl`) | 🔶 **High** | ⏱️ +1 RTT |
 | **TCP Window Size Shrinking** | Sets TCP socket buffer window size to force micro-segmentation. | ✅ Implemented | ✅ Available (`-w`) | 🟡 **Medium** | ⏱️ Minor handshake delay |
 | **TCP Source Port Rotation** | Rotates client TCP port on socket connection to evade 4-tuple blackhole bans. | ✅ Implemented | ✅ Enabled by default (`-R`) | 🔥 **Critical (High)** | ⚡ Zero |
-| **QUIC Alt-Svc Stripping** | Strips `Alt-Svc` headers to enforce TCP TLS 1.3 over censored QUIC UDP. | ✅ Implemented | ✅ Enabled by default (`-s`) | 🔥 **Critical (High)** | ⚡ Zero |
-| **Post-Quantum TLS 1.3 (ML-KEM)** | Supports hybrid ML-KEM-768 Kyber KeyShare extensions to defeat quantum & PQC-aware DPI. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Zero |
+| **Post-Quantum TLS 1.3 (ML-KEM)** | Supports hybrid ML-KEM-768 Kyber KeyShare extensions to defeat quantum & PQC-aware DPI. | ✅ Implemented | ✅ Enabled by default (`-Q`) | 🔥 **Critical (High)** | ⚡ Zero |
 | **Dynamic JA4 Randomization** | Randomizes TLS ClientHello extension ordering to frustrate JA3/JA4 fingerprinting. | ✅ Implemented | ✅ Enabled by default (`-J`) | 🔶 **High** | ⚡ Zero |
 | **UDP-over-TCP (UoT) Mode** | Encapsulates UDP frames inside length-prefixed TCP streams when UDP is blocked. | ❌ Skipped (Too complex) | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Negligible |
-| **Active Probing Fallback Target** | Proxies unauthorized ISP scanner bot probes to a local web server (Nginx/404). | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⚡ Zero |
+| **Active Probing Fallback Target** | Serves realistic Nginx 404 HTML server banner on ISP scanner active probes. | ✅ Implemented | ✅ Available (`--fallback-target`) | 🔶 **High** | ⚡ Zero |
 | **TLS Extension Permutation** | Randomizes TLS extension ordering to prevent static client fingerprinting. | ✅ Implemented | ✅ Enabled by default (`-J`) | 🔶 **High** | ⚡ Zero |
 | **DNS Type 65 Filtering** | Filters malicious DNS `HTTPS` (type 65) records injected by ISP DNS poisoning. | ✅ Implemented | ✅ Enabled by default (`-T`) | 🔶 **High** | ⚡ Zero |
-| **Statistical Traffic Masking** | Transmits low-volume background noise to multiple CDN IPs to confuse flow frequency analyzers. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⏱️ <11 Kbps noise |
+| **Statistical Traffic Masking** | Transmits low-volume background noise to multiple CDN IPs to confuse flow frequency analyzers. | ❌ Skipped (Too complex) | ❌ Not Supported | 🔶 **High** | ⏱️ <11 Kbps noise |
 | **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | ✅ Implemented | ✅ Enabled by default (`-m`) | 🟡 **Medium** | ⚡ Zero |
 | **HTTP CONNECT Space Insertion** | Inserts extra spaces in CONNECT requests to confuse DPI regex splitters. | ✅ Implemented | ✅ Enabled by default (`-e`) | 🟡 **Medium** | ⚡ Zero |
 | **FQDN Trailing Dot Obfuscation** | Appends trailing dot (`example.com.`) to break exact domain filters. | ✅ Implemented | ✅ Available (`-t`) | 🟡 **Medium** | ⚡ Zero |
-| **Auto HTTPS Redirection (Port 80)** | Intercepts plaintext HTTP and issues 301 redirect to encrypted HTTPS. | 🚧 *Planned (Roadmap)* | ✅ Available (`-r`) | 🔶 **High** | ⚡ Faster handshake |
+| **Auto HTTPS Redirection (Port 80)** | Intercepts plaintext HTTP and issues 301 redirect to encrypted HTTPS. | ✅ Implemented | ✅ Available | 🔶 **High** | ⚡ Faster handshake |
 | **DNSCrypt Protocol Support** | Curve25519 authenticated UDP/TCP DNS resolution over Port 443 without TLS SNI. | 🚧 *Planned (Roadmap)* | ❌ N/A (External) | 🔶 **High** | ⏱️ +80-120KB binary |
 
 ---
@@ -67,10 +66,10 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 |------|-------|---------|-------------|
 | `--port` | `-p` | `8080` | Local port for the proxy server to listen on. |
 | `--bind` | `-b` | `127.0.0.1` | IP address to bind (`0.0.0.0` to allow LAN/router clients). |
-| `--aggressive` | `-a` | `false` | Enables **Aggressive Mode** (proportional TLS ClientHello padding per RFC 7685). |
+| `--tls-padding` | `-P` | `false` | Enables **TLS ClientHello Padding** (RFC 7685) to defeat payload length inspection. (Alias: `-a`, `--aggressive`) |
 | `--disorder` | `-D` | `false` | Enables **TCP Disorder Mode** (sends TLS Record 2 before Record 1 to defeat stateful DPI reassembly). |
 | `--fake-ttl` | `-F` | `0` | Injects fake ClientHello with low socket TTL to mislead DPI middleboxes (0 = disabled). |
-| `--fake-sni` | - | `google.com` | Benign domain name used for fake ClientHello injection. |
+| `--fake-sni` | - | `disabled` | Benign domain name used for fake ClientHello injection. |
 | `--window-shrink` | `-W` | `0` | Restricts TCP socket buffer window size to force micro-segmentation (0 = disabled). |
 | `--dns-addr` | `-d` | `127.0.0.1:53` | DNS resolver server IP:port (`127.0.0.1:53` for local loopback / dnscrypt-proxy / dnsmasq). |
 | `--verbose` | `-v` | `false` | Enables verbose debug log output. |
@@ -79,7 +78,7 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 
 ### Parameter Details & Usage Scenarios
 
-- **`-a, --aggressive` (Aggressive Mode)**:  
+- **`-P, --tls-padding` (TLS ClientHello Padding)**:  
   Adds proportional TLS ClientHello padding using RFC 7685 Connection Padding. This prevents DPI systems (such as TSPU in Russia, Iran DPI, etc.) from identifying and blocking proxy connections using ClientHello packet size fingerprinting.
 
 - **`-D, --disorder` (TCP Disorder Mode)**:  
@@ -115,14 +114,14 @@ cargo build --release
 # Basic run (default port 8080 on 127.0.0.1)
 ./target/release/greentunnelRS
 
-# Run with Aggressive Mode enabled (TLS ClientHello Padding)
-./target/release/greentunnelRS --aggressive
+# Run with TLS ClientHello Padding enabled
+./target/release/greentunnelRS --tls-padding
 
-# Run with custom port and Aggressive Mode
-./target/release/greentunnelRS --port 9090 --aggressive
+# Run with custom port and TLS Padding
+./target/release/greentunnelRS --port 9090 --tls-padding
 
-# Run with Aggressive Mode, custom port, and verbose logging
-./target/release/greentunnelRS --port 8080 --aggressive --verbose
+# Run with TLS Padding, custom port, and verbose logging
+./target/release/greentunnelRS --port 8080 --tls-padding --verbose
 
 # Run on OpenWrt / Router (listen on all network interfaces with local dnscrypt-proxy)
 ./target/release/greentunnelRS --bind 0.0.0.0 --port 8080 --dns-addr "127.0.0.1:55"
