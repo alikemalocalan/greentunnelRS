@@ -18,6 +18,8 @@ pub struct Cli {
     pub strip_alt_svc: bool,
     pub port_rotate: bool,
     pub ja4_permute: bool,
+    pub trailing_dot: bool,
+    pub filter_type65: bool,
 }
 
 impl Parser for Cli {
@@ -36,6 +38,8 @@ impl Parser for Cli {
         let mut strip_alt_svc = true;
         let mut port_rotate = true;
         let mut ja4_permute = true;
+        let mut trailing_dot = false;
+        let mut filter_type65 = true;
 
         let args: Vec<String> = std::env::args().collect();
         let mut i = 1;
@@ -69,6 +73,8 @@ impl Parser for Cli {
                 "-s" | "--strip-alt-svc" => strip_alt_svc = true,
                 "-R" | "--port-rotate" => port_rotate = true,
                 "-J" | "--ja4-permute" => ja4_permute = true,
+                "-t" | "--trailing-dot" => trailing_dot = true,
+                "-T" | "--filter-type65" => filter_type65 = true,
                 "-F" | "--fake-ttl" => {
                     if i + 1 < args.len() {
                         if let Ok(val) = args[i + 1].parse() {
@@ -119,6 +125,8 @@ impl Parser for Cli {
             strip_alt_svc,
             port_rotate,
             ja4_permute,
+            trailing_dot,
+            filter_type65,
         }
     }
 }
@@ -139,6 +147,8 @@ Options:
   -s, --strip-alt-svc           Strip Alt-Svc headers to enforce TCP TLS 1.3 over censored QUIC UDP [default: true]
   -R, --port-rotate             Enable TCP source port rotation on connection retries [default: true]
   -J, --ja4-permute             Enable dynamic TLS ClientHello extension permutation [default: true]
+  -t, --trailing-dot            Append root FQDN trailing dot (example.com.) to break DPI regex filters
+  -T, --filter-type65           Filter out poisoned DNS Type 65 (HTTPS/SVCB) records [default: true]
   -F, --fake-ttl <TTL>          Inject fake ClientHello with specified TTL [default: 0 (disabled)]
       --fake-sni <DOMAIN>       Benign domain name for fake ClientHello injection [default: google.com]
   -W, --window-shrink <BYTES>   Restrict TCP socket buffer window size (0 = disabled)
@@ -170,6 +180,8 @@ mod tests {
             strip_alt_svc: true,
             port_rotate: true,
             ja4_permute: true,
+            trailing_dot: false,
+            filter_type65: true,
         };
         assert_eq!(cli.port, 8080);
         assert_eq!(cli.bind, "127.0.0.1");
@@ -180,5 +192,7 @@ mod tests {
         assert!(cli.strip_alt_svc);
         assert!(cli.port_rotate);
         assert!(cli.ja4_permute);
+        assert!(!cli.trailing_dot);
+        assert!(cli.filter_type65);
     }
 }

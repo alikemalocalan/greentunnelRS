@@ -35,14 +35,14 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 | **QUIC Alt-Svc Stripping** | Strips `Alt-Svc` headers to enforce TCP TLS 1.3 over censored QUIC UDP. | ✅ Implemented | ✅ Enabled by default (`-s`) | 🔥 **Critical (High)** | ⚡ Zero |
 | **Post-Quantum TLS 1.3 (ML-KEM)** | Supports hybrid ML-KEM-768 Kyber KeyShare extensions to defeat quantum & PQC-aware DPI. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Zero |
 | **Dynamic JA4 Randomization** | Randomizes TLS ClientHello extension ordering to frustrate JA3/JA4 fingerprinting. | ✅ Implemented | ✅ Enabled by default (`-J`) | 🔶 **High** | ⚡ Zero |
-| **UDP-over-TCP (UoT) Mode** | Encapsulates UDP frames inside length-prefixed TCP streams when UDP is blocked. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Negligible |
+| **UDP-over-TCP (UoT) Mode** | Encapsulates UDP frames inside length-prefixed TCP streams when UDP is blocked. | ❌ Skipped (Too complex) | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Negligible |
 | **Active Probing Fallback Target** | Proxies unauthorized ISP scanner bot probes to a local web server (Nginx/404). | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⚡ Zero |
-| **TLS Extension Permutation** | Randomizes TLS extension ordering to prevent static client fingerprinting. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⚡ Zero |
-| **DNS Type 65 Filtering** | Filters malicious DNS `HTTPS` (type 65) records injected by ISP DNS poisoning. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⚡ Zero |
+| **TLS Extension Permutation** | Randomizes TLS extension ordering to prevent static client fingerprinting. | ✅ Implemented | ✅ Enabled by default (`-J`) | 🔶 **High** | ⚡ Zero |
+| **DNS Type 65 Filtering** | Filters malicious DNS `HTTPS` (type 65) records injected by ISP DNS poisoning. | ✅ Implemented | ✅ Enabled by default (`-T`) | 🔶 **High** | ⚡ Zero |
 | **Statistical Traffic Masking** | Transmits low-volume background noise to multiple CDN IPs to confuse flow frequency analyzers. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⏱️ <11 Kbps noise |
 | **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | ✅ Implemented | ✅ Enabled by default (`-m`) | 🟡 **Medium** | ⚡ Zero |
 | **HTTP CONNECT Space Insertion** | Inserts extra spaces in CONNECT requests to confuse DPI regex splitters. | ✅ Implemented | ✅ Enabled by default (`-e`) | 🟡 **Medium** | ⚡ Zero |
-| **FQDN Trailing Dot Obfuscation** | Appends trailing dot (`example.com.`) to break exact domain filters. | 🚧 *Planned (Roadmap)* | ✅ Available | 🟡 **Medium** | ⚡ Zero |
+| **FQDN Trailing Dot Obfuscation** | Appends trailing dot (`example.com.`) to break exact domain filters. | ✅ Implemented | ✅ Available (`-t`) | 🟡 **Medium** | ⚡ Zero |
 | **Auto HTTPS Redirection (Port 80)** | Intercepts plaintext HTTP and issues 301 redirect to encrypted HTTPS. | 🚧 *Planned (Roadmap)* | ✅ Available (`-r`) | 🔶 **High** | ⚡ Faster handshake |
 | **DNSCrypt Protocol Support** | Curve25519 authenticated UDP/TCP DNS resolution over Port 443 without TLS SNI. | 🚧 *Planned (Roadmap)* | ❌ N/A (External) | 🔶 **High** | ⏱️ +80-120KB binary |
 

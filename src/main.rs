@@ -44,6 +44,8 @@ async fn main() -> anyhow::Result<()> {
         strip_alt_svc: cli.strip_alt_svc,
         port_rotate: cli.port_rotate,
         ja4_permute: cli.ja4_permute,
+        trailing_dot: cli.trailing_dot,
+        filter_type65: cli.filter_type65,
     };
 
     run_server(config).await?;

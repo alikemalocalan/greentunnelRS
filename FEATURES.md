@@ -102,9 +102,9 @@ The censorship system operates directly at the ISP level using centralized **TSP
     - **How it works:** Transmits low-overhead (11 Kbps) dummy background probe packets to multiple benign global CDN IP addresses outside the tunnel.
     - **DPI Impact:** Frustrates ISP flow-frequency statistical analyzers trying to identify proxy IP endpoints by traffic volume correlation.
 
-15. **UDP-over-TCP (UoT) Transport Mode *(Roadmap)*** [ostp]
+15. **UDP-over-TCP (UoT) Transport Mode *(Skipped - Too complex)*** [ostp]
     - **How it works:** Encapsulates UDP/DNS datagrams inside length-prefixed stream framing over plain TCP connections.
-    - **DPI Impact:** Bypasses ISP middleboxes that block UDP port 443 or enforce total UDP drop policies on mobile networks.
+    - **Status:** Skipped per architecture simplification guidelines.
 
 16. **Active Probing Fallback Target / Web Server Mimicry *(Roadmap)*** [ostp]
     - **How it works:** Transparently proxies unauthorized ISP scanner bot active probes to Nginx/Caddy or a local 404 HTML server.
@@ -113,6 +113,14 @@ The censorship system operates directly at the ISP level using centralized **TSP
 17. **Post-Quantum TLS 1.3 Key Exchange Readiness (ML-KEM-768) *(Roadmap)*** [qeli]
     - **How it works:** Supports Post-Quantum hybrid `KeyShare` extensions (`0x11ec` / ML-KEM-768 Kyber) in padded `ClientHello` headers.
     - **DPI Impact:** Prevents DPI devices from flagging connections lacking post-quantum extensions and future-proofs against quantum decryption.
+
+18. **DNS Type 65 (HTTPS/SVCB) Record Filtering**
+    - **How it works:** Filters out malicious DNS Type 65 (`HTTPS`) and Type 64 (`SVCB`) resource records from DNS query responses (`-T` / `--filter-type65`).
+    - **DPI Impact:** Prevents ISP DNS poisoning desynchronization.
+
+19. **FQDN Trailing Dot Obfuscation**
+    - **How it works:** Appends root FQDN trailing dot (`example.com.`) to target hostnames (`-t` / `--trailing-dot`).
+    - **DPI Impact:** Defeats naive exact domain string regex matchers in ISP middleboxes.
 
 ---
 
@@ -135,11 +143,12 @@ The censorship system operates directly at the ISP level using centralized **TSP
 | **QUIC Alt-Svc Stripping** | Strips `Alt-Svc` headers to enforce TCP TLS 1.3 over censored QUIC UDP. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Zero |
 | **Post-Quantum TLS 1.3 (ML-KEM)** | Supports hybrid ML-KEM-768 Kyber KeyShare extensions to defeat quantum & PQC-aware DPI. | 🚧 *Planned (Roadmap)* | 🔥 **Critical (High)** | ⚡ Zero |
 | **Dynamic JA4 Randomization** | Randomizes TLS ClientHello extension ordering to frustrate JA3/JA4 fingerprinting. | ✅ Implemented | 🔶 **High** | ⚡ Zero |
-| **UDP-over-TCP (UoT) Mode** | Encapsulates UDP frames inside length-prefixed TCP streams when UDP is blocked. | 🚧 *Planned (Roadmap)* | 🔥 **Critical (High)** | ⚡ Negligible |
+| **UDP-over-TCP (UoT) Mode** | Encapsulates UDP frames inside length-prefixed TCP streams when UDP is blocked. | ❌ Skipped (Too complex) | 🔥 **Critical (High)** | ⚡ Negligible |
 | **Active Probing Fallback Target** | Proxies unauthorized ISP scanner bot probes to a local web server (Nginx/404). | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⚡ Zero |
 | **TLS Extension Permutation** | Randomizes TLS ClientHello extension ordering to prevent static client fingerprinting. | ✅ Implemented | 🔶 **High** | ⚡ Zero |
+| **DNS Type 65 Filtering** | Filters malicious DNS `HTTPS` (type 65) records injected by ISP DNS poisoning. | ✅ Implemented | 🔶 **High** | ⚡ Zero |
 | **Statistical Traffic Masking** | Transmits low-volume background noise to multiple CDN IPs to confuse flow frequency analyzers. | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⏱️ <11 Kbps noise |
 | **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | ✅ Implemented | 🟡 **Medium** | ⚡ Zero |
 | **HTTP CONNECT Space Insertion** | Inserts extra spaces in CONNECT requests to confuse DPI regex splitters. | ✅ Implemented | 🟡 **Medium** | ⚡ Zero |
-| **FQDN Trailing Dot Obfuscation** | Appends trailing dot (`example.com.`) to break exact domain filters. | 🚧 *Planned (Roadmap)* | 🟡 **Medium** | ⚡ Zero |
+| **FQDN Trailing Dot Obfuscation** | Appends trailing dot (`example.com.`) to break exact domain filters. | ✅ Implemented | 🟡 **Medium** | ⚡ Zero |
 | **DNSCrypt Protocol Support** | Curve25519 authenticated UDP/TCP DNS resolution over Port 443 without TLS SNI. | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⏱️ +80-120KB binary |

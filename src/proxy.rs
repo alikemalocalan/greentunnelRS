@@ -26,6 +26,8 @@ pub struct ProxyServerConfig {
     pub strip_alt_svc: bool,
     pub port_rotate: bool,
     pub ja4_permute: bool,
+    pub trailing_dot: bool,
+    pub filter_type65: bool,
 }
 
 pub async fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
@@ -36,7 +38,7 @@ pub async fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
     let config = Arc::new(config);
 
     tracing::info!(
-        "GreenTunnel Rust Proxy running on http://{} with {} CPU worker threads (AggressiveMode: {}, Disorder: {}, FakeTTL: {}, WindowShrink: {}, HttpSpace: {}, MixHeaderCase: {}, StripAltSvc: {}, PortRotate: {}, JA4Permute: {})",
+        "GreenTunnel Rust Proxy running on http://{} with {} CPU worker threads (AggressiveMode: {}, Disorder: {}, FakeTTL: {}, WindowShrink: {}, HttpSpace: {}, MixHeaderCase: {}, StripAltSvc: {}, PortRotate: {}, JA4Permute: {}, TrailingDot: {}, FilterType65: {})",
         config.bind_addr,
         num_workers,
         config.aggressive_mode,
@@ -47,7 +49,9 @@ pub async fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
         config.mix_header_case,
         config.strip_alt_svc,
         config.port_rotate,
-        config.ja4_permute
+        config.ja4_permute,
+        config.trailing_dot,
+        config.filter_type65
     );
 
     let mut handles = Vec::with_capacity(num_workers);
@@ -133,7 +137,7 @@ async fn handle_client(
     let cleaned_request = preprocess_http_request(&request_str, config.http_space, config.mix_header_case);
 
     if is_http_connect(&cleaned_request) {
-        let (host, port) = match parse_connect_target(&cleaned_request) {
+        let (raw_host, port) = match parse_connect_target(&cleaned_request) {
             Some(target) => target,
             None => {
                 client
@@ -141,6 +145,12 @@ async fn handle_client(
                     .await?;
                 return Ok(());
             }
+        };
+
+        let host = if config.trailing_dot {
+            crate::utils::ensure_trailing_dot(&raw_host)
+        } else {
+            raw_host
         };
 
         tracing::info!("CONNECT request: {}:{}", host, port);

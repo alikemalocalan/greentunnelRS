@@ -189,6 +189,15 @@ pub fn strip_alt_svc_headers(response_str: &str) -> String {
     lines.join("\r\n")
 }
 
+/// Appends root FQDN trailing dot to domain name if missing (e.g. "example.com" -> "example.com.") to break exact domain string matching in DPI middleboxes.
+pub fn ensure_trailing_dot(host: &str) -> String {
+    if host.is_empty() || host.ends_with('.') || host.parse::<std::net::IpAddr>().is_ok() {
+        host.to_string()
+    } else {
+        format!("{}.", host)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,5 +241,13 @@ mod tests {
         assert!(!cleaned.contains("Alt-Svc:"));
         assert!(!cleaned.contains("alt-svc:"));
         assert!(cleaned.contains("Server: gws"));
+    }
+
+    #[test]
+    fn test_ensure_trailing_dot() {
+        assert_eq!(ensure_trailing_dot("youtube.com"), "youtube.com.");
+        assert_eq!(ensure_trailing_dot("youtube.com."), "youtube.com.");
+        assert_eq!(ensure_trailing_dot("127.0.0.1"), "127.0.0.1");
+        assert_eq!(ensure_trailing_dot(""), "");
     }
 }

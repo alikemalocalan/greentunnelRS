@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
@@ -178,13 +178,21 @@ pub fn parse_dns_response(data: &[u8]) -> Option<IpAddr> {
             break;
         }
 
+        // DNS Type 65 (0x0041 / HTTPS) and Type 64 (0x0040 / SVCB) filtering to prevent ISP DNS poisoning
+        if rtype == 65 || rtype == 64 {
+            tracing::info!("DNS Type {} (HTTPS/SVCB) record filtered to prevent ISP DNS poisoning desync", rtype);
+            pos += rdlen;
+            continue;
+        }
+
         if rtype == 1 && rdlen == 4 {
-            return Some(IpAddr::V4(std::net::Ipv4Addr::new(
+            let ip = IpAddr::V4(Ipv4Addr::new(
                 data[pos],
                 data[pos + 1],
                 data[pos + 2],
                 data[pos + 3],
-            )));
+            ));
+            return Some(ip);
         }
 
         pos += rdlen;
