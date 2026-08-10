@@ -1,0 +1,59 @@
+name: Russia Integration Test
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  russia-docker-test:
+    name: Russia VPN + Proxy Integration Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Enable /dev/net/tun on runner
+        run: |
+          sudo mkdir -p /dev/net
+          sudo mknod /dev/net/tun c 10 200 || true
+          sudo chmod 666 /dev/net/tun
+
+      - name: Fetch today's live Russian OpenVPN server URL
+        id: fetch_ovpn
+        run: |
+          HTML_LIST=$(curl -s --connect-timeout 10 https://vpnobratno.info/russia_server_list_en.html || echo "")
+
+          MOSCOW_URL=$(echo "$HTML_LIST" | grep -B2 -A10 "Moscow" | grep -o 'href="[^"]*udp\.ovpn"' | head -n 1 | cut -d'"' -f2 || echo "")
+          FIRST_URL=$(echo "$HTML_LIST" | grep -o 'href="[^"]*udp\.ovpn"' | head -n 1 | cut -d'"' -f2 || echo "")
+
+          if [ -n "$MOSCOW_URL" ]; then
+            OVPN_URL="$MOSCOW_URL"
+          elif [ -n "$FIRST_URL" ]; then
+            OVPN_URL="$FIRST_URL"
+          else
+            echo "::error::Failed to fetch live OpenVPN URL from vpnobratno.info"
+            exit 1
+          fi
+
+          echo "url=$OVPN_URL" >> "$GITHUB_OUTPUT"
+          echo "===> Today's Live OpenVPN URL: $OVPN_URL"
+
+      - name: Build Docker test image
+        run: |
+          docker build \
+            --build-arg OVPN_URL="${{ steps.fetch_ovpn.outputs.url }}" \
+            -t greentunnel-test \
+            -f tests/Dockerfile \
+            .
+
+      - name: Run Russia integration test in Docker
+        run: |
+          docker run --rm \
+            --cap-add=NET_ADMIN \
+            --device=/dev/net/tun \
+            -e OVPN_URL="${{ steps.fetch_ovpn.outputs.url }}" \
+            greentunnel-test
