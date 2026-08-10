@@ -27,7 +27,18 @@ if [ ! -c /dev/net/tun ]; then
     chmod 600 /dev/net/tun
 fi
 
-# 2. Start OpenVPN in background
+# 2. Download OpenVPN configuration directly to /app/openvpn.ovpn if OVPN_URL is specified
+if [ -n "$OVPN_URL" ]; then
+    echo -e "${YELLOW}[+] Downloading OpenVPN configuration from OVPN_URL...${RESET}"
+    echo -e "   ${CYAN}$OVPN_URL${RESET}"
+    if curl -s -f --connect-timeout 10 "$OVPN_URL" -o /app/openvpn.ovpn; then
+        echo -e "   ${GREEN}Successfully downloaded OpenVPN config to /app/openvpn.ovpn!${RESET}"
+    else
+        echo -e "   ${YELLOW}Download failed, using existing /app/openvpn.ovpn${RESET}"
+    fi
+fi
+
+# 3. Start OpenVPN in background
 echo -e "${YELLOW}[+] Starting OpenVPN connection with $(basename "$OVPN_CONFIG")...${RESET}"
 openvpn --config "$OVPN_CONFIG" --log "$OPENVPN_LOG" &
 OPENVPN_PID=$!

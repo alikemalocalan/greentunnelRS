@@ -37,8 +37,10 @@ WORKDIR /app
 # Copy compiled greentunnelRS binary from builder stage
 COPY --from=builder /usr/src/greentunnelRS/target/release/greentunnelRS /usr/local/bin/greentunnelRS
 
-# Copy OpenVPN configuration file and test runner script
-COPY tests/vpn541957482.opengw.net_ddns_udp.ovpn /app/openvpn.ovpn
+# Download dynamic OpenVPN configuration file directly from OVPN_URL build argument
+ARG OVPN_URL
+RUN curl -s -f "$OVPN_URL" -o /app/openvpn.ovpn
+
 COPY tests/run_test.sh /app/run_test.sh
 
 RUN chmod +x /app/run_test.sh
