@@ -143,12 +143,12 @@ The censorship system operates directly at the ISP level using centralized **TSP
 | **QUIC Alt-Svc Stripping** | Strips `Alt-Svc` headers to enforce TCP TLS 1.3 over censored QUIC UDP. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Zero |
 | **Post-Quantum TLS 1.3 (ML-KEM)** | Supports hybrid ML-KEM-768 Kyber KeyShare extensions to defeat quantum & PQC-aware DPI. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Zero |
 | **Dynamic JA4 Randomization** | Randomizes TLS ClientHello extension ordering to frustrate JA3/JA4 fingerprinting. | ✅ Implemented | 🔶 **High** | ⚡ Zero |
-| **UDP-over-TCP (UoT) Mode** | Encapsulates UDP frames inside length-prefixed TCP streams when UDP is blocked. | ❌ Skipped (Too complex) | 🔥 **Critical (High)** | ⚡ Negligible |
 | **Active Probing Fallback Target** | Serves realistic Nginx 404 HTML server banner on ISP scanner active probes. | ✅ Implemented | 🔶 **High** | ⚡ Zero |
 | **TLS Extension Permutation** | Randomizes TLS ClientHello extension ordering to prevent static client fingerprinting. | ✅ Implemented | 🔶 **High** | ⚡ Zero |
 | **DNS Type 65 Filtering** | Filters malicious DNS `HTTPS` (type 65) records injected by ISP DNS poisoning. | ✅ Implemented | 🔶 **High** | ⚡ Zero |
-| **Statistical Traffic Masking** | Transmits low-volume background noise to multiple CDN IPs to confuse flow frequency analyzers. | ❌ Skipped (Too complex) | 🔶 **High** | ⏱️ <11 Kbps noise |
 | **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | ✅ Implemented | 🟡 **Medium** | ⚡ Zero |
 | **HTTP CONNECT Space Insertion** | Inserts extra spaces in CONNECT requests to confuse DPI regex splitters. | ✅ Implemented | 🟡 **Medium** | ⚡ Zero |
 | **FQDN Trailing Dot Obfuscation** | Appends trailing dot (`example.com.`) to break exact domain filters. | ✅ Implemented | 🟡 **Medium** | ⚡ Zero |
+| **UDP-over-TCP (UoT) Mode** | Encapsulates UDP frames inside length-prefixed TCP streams when UDP is blocked. | ❌ Skipped (Too complex) | 🔥 **Critical (High)** | ⚡ Negligible |
+| **Statistical Traffic Masking** | Transmits low-volume background noise to multiple CDN IPs to confuse flow frequency analyzers. | ❌ Skipped (Too complex) | 🔶 **High** | ⏱️ <11 Kbps noise |
 | **DNSCrypt Protocol Support** | Curve25519 authenticated UDP/TCP DNS resolution over Port 443 without TLS SNI. | 🚧 *Planned (Roadmap)* | 🔶 **High** | ⏱️ +80-120KB binary |

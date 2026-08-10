@@ -11,14 +11,13 @@ pub struct DnsResolver {
 
 impl DnsResolver {
     pub fn new(dns_addr: &str) -> Self {
-        let addr =
-            if dns_addr.is_empty() || dns_addr.contains("http") || dns_addr.contains("google") {
-                "127.0.0.1:53".to_string()
-            } else if !dns_addr.contains(':') {
-                format!("{}:53", dns_addr)
-            } else {
-                dns_addr.to_string()
-            };
+        let addr = if dns_addr.is_empty() {
+            "127.0.0.1:53".to_string()
+        } else if !dns_addr.contains(':') {
+            format!("{}:53", dns_addr)
+        } else {
+            dns_addr.to_string()
+        };
 
         Self {
             dns_addr: addr,
@@ -43,14 +42,11 @@ impl DnsResolver {
             }
         }
 
-        tracing::debug!("UDP DNS resolving: {} via {}", clean_domain, self.dns_addr);
-
         let query = build_dns_query(clean_domain);
 
         // Try direct UDP DNS query to local loopback (127.0.0.1:53 / dnscrypt-proxy / dnsmasq)
         if let Some(resp_buf) = self.query_udp(&query).await {
             if let Some(ip) = parse_dns_response(&resp_buf) {
-                tracing::debug!("UDP DNS resolved {} -> {}", clean_domain, ip);
                 let mut cache_write = self.cache.write().await;
                 if cache_write.len() > 500 {
                     cache_write.clear();
@@ -64,7 +60,6 @@ impl DnsResolver {
         if let Ok(mut addrs) = tokio::net::lookup_host(format!("{}:443", clean_domain)).await {
             if let Some(addr) = addrs.next() {
                 let ip = addr.ip();
-                tracing::debug!("System DNS resolved {} -> {}", clean_domain, ip);
                 let mut cache_write = self.cache.write().await;
                 if cache_write.len() > 500 {
                     cache_write.clear();
@@ -74,7 +69,6 @@ impl DnsResolver {
             }
         }
 
-        tracing::warn!("All DNS resolution methods failed for {}", clean_domain);
         None
     }
 
@@ -83,7 +77,7 @@ impl DnsResolver {
         let socket = UdpSocket::bind(bind_addr).await.ok()?;
         let target_addr: SocketAddr = self.dns_addr.parse().ok()?;
 
-        for attempt in 0..2 {
+        for _attempt in 0..2 {
             if socket.send_to(query_msg, target_addr).await.is_err() {
                 continue;
             }
@@ -91,15 +85,10 @@ impl DnsResolver {
             let mut buf = [0u8; 1024];
             let timeout = std::time::Duration::from_millis(2500);
 
-            match tokio::time::timeout(timeout, socket.recv_from(&mut buf)).await {
-                Ok(Ok((len, _))) => return Some(buf[..len].to_vec()),
-                _ => {
-                    tracing::debug!(
-                        "UDP DNS query attempt {} timed out for {}",
-                        attempt + 1,
-                        self.dns_addr
-                    );
-                }
+            if let Ok(Ok((len, _))) =
+                tokio::time::timeout(timeout, socket.recv_from(&mut buf)).await
+            {
+                return Some(buf[..len].to_vec());
             }
         }
 
@@ -191,10 +180,6 @@ pub fn parse_dns_response(data: &[u8]) -> Option<IpAddr> {
 
         // DNS Type 65 (0x0041 / HTTPS) and Type 64 (0x0040 / SVCB) filtering to prevent ISP DNS poisoning
         if rtype == 65 || rtype == 64 {
-            tracing::info!(
-                "DNS Type {} (HTTPS/SVCB) record filtered to prevent ISP DNS poisoning desync",
-                rtype
-            );
             pos += rdlen;
             continue;
         }

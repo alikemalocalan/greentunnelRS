@@ -34,15 +34,15 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 | **TCP Source Port Rotation** | Rotates client TCP port on socket connection to evade 4-tuple blackhole bans. | ✅ Implemented | ✅ Enabled by default (`-R`) | 🔥 **Critical (High)** | ⚡ Zero |
 | **Post-Quantum TLS 1.3 (ML-KEM)** | Supports hybrid ML-KEM-768 Kyber KeyShare extensions to defeat quantum & PQC-aware DPI. | ✅ Implemented | ✅ Enabled by default (`-Q`) | 🔥 **Critical (High)** | ⚡ Zero |
 | **Dynamic JA4 Randomization** | Randomizes TLS ClientHello extension ordering to frustrate JA3/JA4 fingerprinting. | ✅ Implemented | ✅ Enabled by default (`-J`) | 🔶 **High** | ⚡ Zero |
-| **UDP-over-TCP (UoT) Mode** | Encapsulates UDP frames inside length-prefixed TCP streams when UDP is blocked. | ❌ Skipped (Too complex) | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Negligible |
 | **Active Probing Fallback Target** | Serves realistic Nginx 404 HTML server banner on ISP scanner active probes. | ✅ Implemented | ✅ Available (`--fallback-target`) | 🔶 **High** | ⚡ Zero |
 | **TLS Extension Permutation** | Randomizes TLS extension ordering to prevent static client fingerprinting. | ✅ Implemented | ✅ Enabled by default (`-J`) | 🔶 **High** | ⚡ Zero |
 | **DNS Type 65 Filtering** | Filters malicious DNS `HTTPS` (type 65) records injected by ISP DNS poisoning. | ✅ Implemented | ✅ Enabled by default (`-T`) | 🔶 **High** | ⚡ Zero |
-| **Statistical Traffic Masking** | Transmits low-volume background noise to multiple CDN IPs to confuse flow frequency analyzers. | ❌ Skipped (Too complex) | ❌ Not Supported | 🔶 **High** | ⏱️ <11 Kbps noise |
 | **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | ✅ Implemented | ✅ Enabled by default (`-m`) | 🟡 **Medium** | ⚡ Zero |
 | **HTTP CONNECT Space Insertion** | Inserts extra spaces in CONNECT requests to confuse DPI regex splitters. | ✅ Implemented | ✅ Enabled by default (`-e`) | 🟡 **Medium** | ⚡ Zero |
 | **FQDN Trailing Dot Obfuscation** | Appends trailing dot (`example.com.`) to break exact domain filters. | ✅ Implemented | ✅ Available (`-t`) | 🟡 **Medium** | ⚡ Zero |
 | **Auto HTTPS Redirection (Port 80)** | Intercepts plaintext HTTP and issues 301 redirect to encrypted HTTPS. | ✅ Implemented | ✅ Available | 🔶 **High** | ⚡ Faster handshake |
+| **UDP-over-TCP (UoT) Mode** | Encapsulates UDP frames inside length-prefixed TCP streams when UDP is blocked. | ❌ Skipped (Too complex) | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Negligible |
+| **Statistical Traffic Masking** | Transmits low-volume background noise to multiple CDN IPs to confuse flow frequency analyzers. | ❌ Skipped (Too complex) | ❌ Not Supported | 🔶 **High** | ⏱️ <11 Kbps noise |
 | **DNSCrypt Protocol Support** | Curve25519 authenticated UDP/TCP DNS resolution over Port 443 without TLS SNI. | 🚧 *Planned (Roadmap)* | ❌ N/A (External) | 🔶 **High** | ⏱️ +80-120KB binary |
 
 ---
@@ -66,11 +66,20 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 |------|-------|---------|-------------|
 | `--port` | `-p` | `8080` | Local port for the proxy server to listen on. |
 | `--bind` | `-b` | `127.0.0.1` | IP address to bind (`0.0.0.0` to allow LAN/router clients). |
-| `--tls-padding` | `-P` | `false` | Enables **TLS ClientHello Padding** (RFC 7685) to defeat payload length inspection. (Alias: `-a`, `--aggressive`) |
-| `--disorder` | `-D` | `false` | Enables **TCP Disorder Mode** (sends TLS Record 2 before Record 1 to defeat stateful DPI reassembly). |
+| `--tls-padding` | `-P` | `true` | Enables **TLS ClientHello Padding** (RFC 7685) to defeat payload length inspection. (Alias: `-a`, `--aggressive`) |
+| `--disorder` | `-D` | `true` | Enables **TCP Disorder Mode** (sends TLS Record 2 before Record 1 to defeat stateful DPI reassembly). |
 | `--fake-ttl` | `-F` | `0` | Injects fake ClientHello with low socket TTL to mislead DPI middleboxes (0 = disabled). |
-| `--fake-sni` | - | `disabled` | Benign domain name used for fake ClientHello injection. |
+| `--fake-sni` | - | `disabled` | Benign domain name used for fake ClientHello injection (e.g. `google.com`). |
 | `--window-shrink` | `-W` | `0` | Restricts TCP socket buffer window size to force micro-segmentation (0 = disabled). |
+| `--http-space` | `-e` | `true` | Enables HTTP CONNECT space insertion desynchronization. |
+| `--mix-header-case` | `-m` | `true` | Enables HTTP header key case mixing desynchronization. |
+| `--strip-alt-svc` | `-s` | `true` | Strips `Alt-Svc` headers to enforce TCP TLS 1.3 over censored QUIC UDP. |
+| `--port-rotate` | `-R` | `true` | Enables TCP source port rotation on connection retries to evade 4-tuple bans. |
+| `--ja4-permute` | `-J` | `false` | Enables dynamic TLS ClientHello extension permutation (JA4 randomization). |
+| `--trailing-dot` | `-t` | `true` | Appends root FQDN trailing dot (`example.com.`) to break exact domain filters. |
+| `--filter-type65` | `-T` | `true` | Filters malicious DNS `HTTPS` (type 65) records injected by ISP DNS poisoning. |
+| `--post-quantum` | `-Q` | `true` | Enables Post-Quantum TLS 1.3 ML-KEM-768 extension support. |
+| `--fallback-target` | - | `127.0.0.1:80` | Serves realistic Nginx 404 HTML server banner on ISP scanner active probes. |
 | `--dns-addr` | `-d` | `127.0.0.1:53` | DNS resolver server IP:port (`127.0.0.1:53` for local loopback / dnscrypt-proxy / dnsmasq). |
 | `--verbose` | `-v` | `false` | Enables verbose debug log output. |
 | `--help` | `-h` | - | Prints help and parameter information. |
@@ -78,14 +87,18 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 
 ### Parameter Details & Usage Scenarios
 
+- **`-F, --fake-ttl <TTL>` & `--fake-sni <DOMAIN>` (Fake Packet TTL Injection Scenario)**:  
+  Injects a synthetic, benign `ClientHello` payload (e.g. `--fake-sni google.com`) with a low Time-To-Live (`--fake-ttl 5`) over a separate out-of-band probe socket prior to sending the real encrypted stream. The ISP DPI firewall receives and inspects the fake benign packet, placing the connection state in a "pass" state. The low TTL ensures the fake packet expires in transit before reaching the real destination server, preventing any stream corruption or connection resets.
+  ```bash
+  # Scenario: Enable Fake Packet TTL Injection with fake google.com SNI and TTL=5
+  ./greentunnelRS --port 8080 --fake-ttl 5 --fake-sni google.com --verbose
+  ```
+
 - **`-P, --tls-padding` (TLS ClientHello Padding)**:  
   Adds proportional TLS ClientHello padding using RFC 7685 Connection Padding. This prevents DPI systems (such as TSPU in Russia, Iran DPI, etc.) from identifying and blocking proxy connections using ClientHello packet size fingerprinting.
 
 - **`-D, --disorder` (TCP Disorder Mode)**:  
   Transmits TLS Record 2 (containing trailing handshake data) *before* TLS Record 1 (containing the SNI split). Confuses stateful DPI reassembly engines while the target server's OS TCP stack correctly re-assembles the stream.
-
-- **`-F, --fake-ttl <TTL>` (Fake Packet Injection)**:  
-  Injects a fake `ClientHello` payload for `--fake-sni` (e.g. `google.com`) with a low TTL (Time-To-Live). The fake packet reaches and misleads the ISP DPI box, while expiring before reaching the target server.
 
 - **`-W, --window-shrink <BYTES>` (TCP Window Shrinking)**:  
   Restricts socket buffer window size to force OS-level TCP micro-segmentation.
@@ -114,14 +127,11 @@ cargo build --release
 # Basic run (default port 8080 on 127.0.0.1)
 ./target/release/greentunnelRS
 
-# Run with TLS ClientHello Padding enabled
-./target/release/greentunnelRS --tls-padding
+# Run with Fake Packet TTL Injection enabled (fake SNI google.com, TTL 5)
+./target/release/greentunnelRS --port 8080 --fake-ttl 5 --fake-sni google.com
 
-# Run with custom port and TLS Padding
-./target/release/greentunnelRS --port 9090 --tls-padding
-
-# Run with TLS Padding, custom port, and verbose logging
-./target/release/greentunnelRS --port 8080 --tls-padding --verbose
+# Run with TLS ClientHello Padding and Fake TTL enabled
+./target/release/greentunnelRS --port 8080 --tls-padding --fake-ttl 5 --fake-sni google.com --verbose
 
 # Run on OpenWrt / Router (listen on all network interfaces with local dnscrypt-proxy)
 ./target/release/greentunnelRS --bind 0.0.0.0 --port 8080 --dns-addr "127.0.0.1:55"

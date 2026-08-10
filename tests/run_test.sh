@@ -132,11 +132,11 @@ for url in "${TARGET_URLS[@]}"; do
     # Run curl through greentunnelRS proxy
     http_code=$(curl -s -o /dev/null -w "%{http_code}" -x "http://127.0.0.1:$PROXY_PORT" --connect-timeout 10 --max-time 15 "$url" 2>/dev/null || echo "000")
 
-    if [ "$http_code" != "000" ] && [ -n "$http_code" ]; then
+    if [[ "$http_code" =~ ^[23][0-9]{2}$ ]]; then
         PASSED_TESTS=$((PASSED_TESTS + 1))
         printf "%-35s \033[0;32m%-15s\033[0m \033[0;32m%-10s\033[0m\n" "$url" "HTTP $http_code" "[ PASS ]"
     else
-        printf "%-35s \033[0;31m%-15s\033[0m \033[0;31m%-10s\033[0m\n" "$url" "FAILED (000)" "[ FAIL ]"
+        printf "%-35s \033[0;31m%-15s\033[0m \033[0;31m%-10s\033[0m\n" "$url" "HTTP ${http_code:-000}" "[ FAIL ]"
     fi
 done
 

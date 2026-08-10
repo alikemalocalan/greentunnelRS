@@ -10,9 +10,8 @@ pub fn fragment_at_offset(data: &[u8], absolute_split_offset: usize) -> Vec<Vec<
     }
 
     let content_type = data[0];
-    // RFC 8446 Section 5.1: TLS 1.3 outer record layer headers MUST use legacy_record_version 0x0301 (TLS 1.0)
-    let version_major = 0x03;
-    let version_minor = 0x01;
+    let version_major = data[1];
+    let version_minor = data[2];
 
     let payload1 = &data[TLS_RECORD_HEADER_SIZE..absolute_split_offset];
     let payload2 = &data[absolute_split_offset..];
@@ -61,6 +60,11 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert_eq!(records[0][0], 0x16);
         assert_eq!(records[1][0], 0x16);
+        // Verify outer TLS record layer version matches client's record version (bytes 1-2)
+        assert_eq!(records[0][1], client_hello[1]);
+        assert_eq!(records[0][2], client_hello[2]);
+        assert_eq!(records[1][1], client_hello[1]);
+        assert_eq!(records[1][2], client_hello[2]);
 
         // Verify combined payload length equals original payload
         let payload1_len = records[0].len() - TLS_RECORD_HEADER_SIZE;

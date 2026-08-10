@@ -170,7 +170,17 @@ Options:
   -d, --dns-addr <IP:PORT>      DNS resolver server IP:port [default: 127.0.0.1:53]
   -v, --verbose                 Enable verbose debug log output
   -h, --help                    Print help information
-  -V, --version                 Print version information"#
+  -V, --version                 Print version information
+
+Examples:
+  # Basic run on localhost port 8080:
+  greentunnelRS --port 8080
+
+  # Run with Fake TTL Packet Injection enabled (fake google.com SNI with TTL 5):
+  greentunnelRS --port 8080 --fake-ttl 5 --fake-sni google.com
+
+  # Advanced DPI bypass with TLS Padding, Disorder Mode, and Fake TTL:
+  greentunnelRS -P -D -F 5 --fake-sni google.com -d 127.0.0.1:53"#
     );
 }
 
@@ -183,38 +193,38 @@ mod tests {
         let cli = Cli {
             port: 8080,
             bind: "127.0.0.1".to_string(),
-            tls_padding: false,
+            tls_padding: true,
             dns_addr: "127.0.0.1:53".to_string(),
             verbose: false,
-            disorder: false,
+            disorder: true,
             fake_ttl: 0,
             fake_sni: "".to_string(),
             window_shrink: 0,
-            http_space: false,
-            mix_header_case: false,
+            http_space: true,
+            mix_header_case: true,
             strip_alt_svc: true,
             port_rotate: true,
             ja4_permute: false,
-            trailing_dot: false,
+            trailing_dot: true,
             filter_type65: true,
-            post_quantum: false,
+            post_quantum: true,
             fallback_target: "127.0.0.1:80".to_string(),
         };
         assert_eq!(cli.port, 8080);
         assert_eq!(cli.bind, "127.0.0.1");
         assert_eq!(cli.dns_addr, "127.0.0.1:53");
         assert_eq!(cli.fake_sni, "");
-        assert!(!cli.tls_padding);
+        assert!(cli.tls_padding);
         assert_eq!(cli.fake_ttl, 0);
         assert_eq!(cli.window_shrink, 0);
-        assert!(!cli.http_space);
-        assert!(!cli.mix_header_case);
+        assert!(cli.http_space);
+        assert!(cli.mix_header_case);
         assert!(cli.strip_alt_svc);
         assert!(cli.port_rotate);
         assert!(!cli.ja4_permute);
-        assert!(!cli.trailing_dot);
+        assert!(cli.trailing_dot);
         assert!(cli.filter_type65);
-        assert!(!cli.post_quantum);
+        assert!(cli.post_quantum);
         assert_eq!(cli.fallback_target, "127.0.0.1:80");
     }
 }

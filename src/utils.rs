@@ -128,11 +128,7 @@ pub fn apply_header_case_mixing(request_str: &str) -> String {
     let mut lines = Vec::new();
     for (i, line) in request_str.lines().enumerate() {
         if i == 0 {
-            if let Some((method, rest)) = line.split_once(' ') {
-                lines.push(format!("{} {}", mix_case(method), rest));
-            } else {
-                lines.push(line.to_string());
-            }
+            lines.push(line.to_string());
             continue;
         }
         if line.is_empty() {
@@ -140,8 +136,7 @@ pub fn apply_header_case_mixing(request_str: &str) -> String {
             break;
         }
         if let Some((key, val)) = line.split_once(':') {
-            let mixed_key = mix_case(key.trim());
-            lines.push(format!("{}:{}", mixed_key, val));
+            lines.push(format!("{}:{}", mix_case(key.trim()), val));
         } else {
             lines.push(line.to_string());
         }

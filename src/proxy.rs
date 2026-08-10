@@ -251,45 +251,27 @@ async fn handle_client(
         if hello_len > 0 {
             let raw_bytes = &client_hello_buf[..hello_len];
 
-            // Fake Packet TTL Injection on a separate dummy probe socket to avoid main TLS stream corruption
+            // Fake Packet TTL Injection on a separate dummy probe socket
             if config.fake_ttl > 0
                 && !config.fake_sni.is_empty()
                 && !is_padding_incompatible_domain(&host)
                 && is_client_hello(raw_bytes)
             {
                 if let Ok(peer_addr) = remote.peer_addr() {
-                    if let Ok(mut fake_stream) = TcpStream::connect(peer_addr).await {
-                        fake_stream.set_ttl(config.fake_ttl).ok();
-                        let fake_hello =
-                            crate::tls::build_synthetic_client_hello(Some(&config.fake_sni), false);
-                        let _ = fake_stream.write_all(&fake_hello).await;
-                        let _ = fake_stream.flush().await;
-                        tracing::info!(
-                            "Fake TTL Packet injected on probe socket for {}: fake SNI {}, TTL {}",
-                            host,
-                            config.fake_sni,
-                            config.fake_ttl
-                        );
-                    }
+                    inject_fake_ttl_probe(peer_addr, &config.fake_sni, config.fake_ttl).await;
+                    tracing::info!(
+                        "Fake TTL Packet injected on probe socket for {}: fake SNI {}, TTL {}",
+                        host,
+                        config.fake_sni,
+                        config.fake_ttl
+                    );
                 }
             }
 
             // Separate the first TLS record (ClientHello) from any trailing buffer data
-            // Firefox and modern browsers often pipeline initial ClientHello with session tickets or application data.
-            let (raw_ch, trailing_data) = if is_client_hello(raw_bytes) {
-                let payload_len = crate::tls::read_u16(raw_bytes, 3).unwrap_or(0) as usize;
-                let rec_len = TLS_RECORD_HEADER_SIZE + payload_len;
-                if rec_len > TLS_RECORD_HEADER_SIZE && raw_bytes.len() > rec_len {
-                    (&raw_bytes[..rec_len], &raw_bytes[rec_len..])
-                } else {
-                    (raw_bytes, &[][..])
-                }
-            } else {
-                (raw_bytes, &[][..])
-            };
+            let (raw_ch, trailing_data) = extract_first_tls_record(raw_bytes);
 
             // Step 1: TLS ClientHello Padding (RFC 7685)
-            // Skip padding for Meta/Facebook/Instagram domains because Meta's C++ Fizz TLS stack drops padded ClientHello records.
             let mut bytes = if config.tls_padding
                 && !is_padding_incompatible_domain(&host)
                 && is_client_hello(raw_ch)
@@ -299,7 +281,7 @@ async fn handle_client(
                 raw_ch.to_vec()
             };
 
-            // Dynamic JA4 Extension Permutation: randomize TLS extension ordering to defeat JA3/JA4 fingerprinting
+            // Step 2: JA4 Extension Permutation
             if config.ja4_permute && is_client_hello(&bytes) {
                 bytes = crate::tls::permute_tls_extensions(&bytes);
             }
@@ -313,51 +295,21 @@ async fn handle_client(
 
             if let Some(sni_info) = find_sni_info(&bytes) {
                 if sni_info.hostname_length > 4 {
-                    let cut_in_sni = if sni_info.hostname_length > 6 {
-                        let start_offset = if host.to_lowercase().starts_with("www.") {
-                            4
-                        } else {
-                            0
-                        };
-                        let domain_len = sni_info.hostname_length.saturating_sub(start_offset);
-                        let mid = start_offset + (domain_len / 2);
-                        let min_cut = (mid.saturating_sub(1)).max(start_offset + 2);
-                        let max_cut = (mid + 1).min(sni_info.hostname_length - 2);
-                        if min_cut <= max_cut {
-                            rand::random_range(min_cut..=max_cut)
-                        } else {
-                            sni_info.hostname_length / 2
-                        }
-                    } else {
-                        sni_info.hostname_length / 2
-                    };
+                    let cut_in_sni = calculate_sni_cut_offset(sni_info.hostname_length, &host);
                     let split_point = sni_info.hostname_offset + cut_in_sni;
 
                     if split_point > TLS_RECORD_HEADER_SIZE && split_point < bytes.len() {
                         let tls_records = fragment_at_offset(&bytes, split_point);
-
                         let is_meta = is_padding_incompatible_domain(&host);
 
-                        // Send Record 1 (split SNI)
-                        remote.write_all(&tls_records[0]).await?;
-                        remote.flush().await?;
-
-                        // Fast inter-fragment delay (1-5ms) to trigger DPI reassembly timeout unless Meta domain
-                        if !is_meta {
-                            random_delay(1, 5).await;
-                        }
-
-                        // Send remaining ClientHello records (Record 2)
-                        for rec in &tls_records[1..] {
-                            remote.write_all(rec).await?;
-                        }
-                        remote.flush().await?;
-
-                        // Send any trailing unfragmented bytes read from client buffer
-                        if !trailing_data.is_empty() {
-                            remote.write_all(trailing_data).await?;
-                            remote.flush().await?;
-                        }
+                        transmit_tls_records(
+                            &mut remote,
+                            &tls_records,
+                            trailing_data,
+                            is_meta,
+                            config.disorder_mode,
+                        )
+                        .await?;
 
                         tracing::info!(
                             "DPI Bypass applied for {}: split at byte {}, delay {}, {} TLS records",
@@ -367,7 +319,6 @@ async fn handle_client(
                             tls_records.len()
                         );
 
-                        // Tunnel remaining bidirectional TCP stream
                         tunnel_bidirectional(&mut client, &mut remote).await?;
                         return Ok(());
                     }
@@ -378,7 +329,6 @@ async fn handle_client(
             split_and_write(&bytes, &mut remote).await?;
         }
 
-        // Tunnel remaining bidirectional TCP stream
         tunnel_bidirectional(&mut client, &mut remote).await?;
     } else if request_str.starts_with("GET ") || request_str.starts_with("POST ") {
         // Plaintext HTTP request redirect to HTTPS
@@ -404,6 +354,77 @@ async fn handle_client(
             html_body
         );
         let _ = client.write_all(response.as_bytes()).await;
+    }
+
+    Ok(())
+}
+
+fn extract_first_tls_record(raw_bytes: &[u8]) -> (&[u8], &[u8]) {
+    if is_client_hello(raw_bytes) {
+        let payload_len = crate::tls::read_u16(raw_bytes, 3).unwrap_or(0) as usize;
+        let rec_len = TLS_RECORD_HEADER_SIZE + payload_len;
+        if rec_len > TLS_RECORD_HEADER_SIZE && raw_bytes.len() > rec_len {
+            (&raw_bytes[..rec_len], &raw_bytes[rec_len..])
+        } else {
+            (raw_bytes, &[][..])
+        }
+    } else {
+        (raw_bytes, &[][..])
+    }
+}
+
+fn calculate_sni_cut_offset(hostname_length: usize, host: &str) -> usize {
+    if hostname_length > 6 {
+        let start_offset = if host.to_lowercase().starts_with("www.") { 4 } else { 0 };
+        let domain_len = hostname_length.saturating_sub(start_offset);
+        let mid = start_offset + (domain_len / 2);
+        let min_cut = (mid.saturating_sub(1)).max(start_offset + 2);
+        let max_cut = (mid + 1).min(hostname_length - 2);
+        if min_cut <= max_cut {
+            rand::random_range(min_cut..=max_cut)
+        } else {
+            hostname_length / 2
+        }
+    } else {
+        hostname_length / 2
+    }
+}
+
+async fn inject_fake_ttl_probe(peer_addr: SocketAddr, fake_sni: &str, fake_ttl: u32) {
+    if let Ok(mut fake_stream) = TcpStream::connect(peer_addr).await {
+        fake_stream.set_ttl(fake_ttl).ok();
+        let fake_hello = crate::tls::build_synthetic_client_hello(Some(fake_sni), false);
+        let _ = fake_stream.write_all(&fake_hello).await;
+        let _ = fake_stream.flush().await;
+    }
+}
+
+async fn transmit_tls_records(
+    remote: &mut TcpStream,
+    tls_records: &[Vec<u8>],
+    trailing_data: &[u8],
+    is_meta: bool,
+    _disorder_mode: bool,
+) -> anyhow::Result<()> {
+    // Record 1 (containing first half of SNI) must be transmitted first
+    remote.write_all(&tls_records[0]).await?;
+    remote.flush().await?;
+
+    // Fast inter-fragment delay (1-5ms) to trigger DPI reassembly timeout unless Meta domain
+    if !is_meta {
+        random_delay(1, 5).await;
+    }
+
+    // Record 2 (containing second half of SNI and trailing extensions) transmitted second
+    for rec in &tls_records[1..] {
+        remote.write_all(rec).await?;
+    }
+    remote.flush().await?;
+
+    // Send any trailing unfragmented bytes read from client buffer
+    if !trailing_data.is_empty() {
+        remote.write_all(trailing_data).await?;
+        remote.flush().await?;
     }
 
     Ok(())
