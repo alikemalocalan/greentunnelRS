@@ -80,15 +80,23 @@ impl DnsResolver {
         let socket = UdpSocket::bind(bind_addr).await.ok()?;
         let target_addr: SocketAddr = self.dns_addr.parse().ok()?;
 
-        socket.send_to(query_msg, target_addr).await.ok()?;
+        for attempt in 0..2 {
+            if socket.send_to(query_msg, target_addr).await.is_err() {
+                continue;
+            }
 
-        let mut buf = [0u8; 1024];
-        let timeout = std::time::Duration::from_millis(500);
+            let mut buf = [0u8; 1024];
+            let timeout = std::time::Duration::from_millis(2500);
 
-        match tokio::time::timeout(timeout, socket.recv_from(&mut buf)).await {
-            Ok(Ok((len, _))) => Some(buf[..len].to_vec()),
-            _ => None,
+            match tokio::time::timeout(timeout, socket.recv_from(&mut buf)).await {
+                Ok(Ok((len, _))) => return Some(buf[..len].to_vec()),
+                _ => {
+                    tracing::debug!("UDP DNS query attempt {} timed out for {}", attempt + 1, self.dns_addr);
+                }
+            }
         }
+
+        None
     }
 }
 
@@ -150,15 +158,16 @@ pub fn parse_dns_response(data: &[u8]) -> Option<IpAddr> {
 
     // Skip Question section
     for _ in 0..qdcount {
-        pos = skip_dns_name(data, pos)?;
-        pos += 4; // Skip QTYPE + QCLASS
+        let Some(next_pos) = skip_dns_name(data, pos) else { return None; };
+        pos = next_pos + 4; // Skip QTYPE + QCLASS
     }
 
     // Parse Answer section records
     for _ in 0..ancount {
-        pos = skip_dns_name(data, pos)?;
+        let Some(next_pos) = skip_dns_name(data, pos) else { break; };
+        pos = next_pos;
         if pos + 10 > data.len() {
-            return None;
+            break;
         }
 
         let rtype = u16::from_be_bytes([data[pos], data[pos + 1]]);
@@ -166,7 +175,7 @@ pub fn parse_dns_response(data: &[u8]) -> Option<IpAddr> {
         pos += 10;
 
         if pos + rdlen > data.len() {
-            return None;
+            break;
         }
 
         if rtype == 1 && rdlen == 4 {

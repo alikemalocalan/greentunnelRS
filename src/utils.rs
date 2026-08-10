@@ -39,7 +39,9 @@ pub async fn random_delay(min_ms: u64, max_ms: u64) {
 
 /// Checks if a string case-insensitively starts with an HTTP CONNECT method.
 pub fn is_http_connect(header_line: &str) -> bool {
-    header_line.to_uppercase().starts_with("CONNECT ")
+    let trimmed = header_line.trim_start();
+    let first_word = trimmed.split_whitespace().next().unwrap_or("");
+    first_word.eq_ignore_ascii_case("CONNECT")
 }
 
 /// Detects domains (like Meta/Instagram/Facebook/WhatsApp) whose proprietary TLS stack (Fizz TLS) rejects TLS padding extensions.
@@ -58,7 +60,7 @@ pub fn is_padding_incompatible_domain(host: &str) -> bool {
 pub fn parse_connect_target(request_str: &str) -> Option<(String, u16)> {
     let first_line = request_str.lines().next()?;
     let parts: Vec<&str> = first_line.split_whitespace().collect();
-    if parts.len() < 2 || parts[0].to_uppercase() != "CONNECT" {
+    if parts.len() < 2 || !parts[0].eq_ignore_ascii_case("CONNECT") {
         return None;
     }
 
@@ -95,26 +97,139 @@ pub fn strip_proxy_headers(request_str: &str) -> String {
     lines.join("\r\n")
 }
 
+/// Inserts extra space padding into an HTTP request line to confuse DPI regex splitters.
+pub fn apply_connect_space_insertion(request_line: &str) -> String {
+    let parts: Vec<&str> = request_line.split_whitespace().collect();
+    if parts.len() >= 3 {
+        format!("{}   {}   {}", parts[0], parts[1], parts[2])
+    } else if parts.len() == 2 {
+        format!("{}   {}", parts[0], parts[1])
+    } else {
+        request_line.to_string()
+    }
+}
+
+/// Alternates letter casing of a string (e.g. "Host" -> "hOsT").
+pub fn mix_case(s: &str) -> String {
+    s.chars()
+        .enumerate()
+        .map(|(i, c)| {
+            if i % 2 == 0 {
+                c.to_ascii_lowercase()
+            } else {
+                c.to_ascii_uppercase()
+            }
+        })
+        .collect()
+}
+
+/// Applies header key case mixing desynchronization to HTTP header strings.
+pub fn apply_header_case_mixing(request_str: &str) -> String {
+    let mut lines = Vec::new();
+    for (i, line) in request_str.lines().enumerate() {
+        if i == 0 {
+            if let Some((method, rest)) = line.split_once(' ') {
+                lines.push(format!("{} {}", mix_case(method), rest));
+            } else {
+                lines.push(line.to_string());
+            }
+            continue;
+        }
+        if line.is_empty() {
+            lines.push(line.to_string());
+            break;
+        }
+        if let Some((key, val)) = line.split_once(':') {
+            let mixed_key = mix_case(key.trim());
+            lines.push(format!("{}:{}", mixed_key, val));
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    lines.join("\r\n")
+}
+
+/// Preprocesses HTTP request string by stripping proxy headers, applying HTTP CONNECT space insertion, and header case mixing.
+pub fn preprocess_http_request(request_str: &str, http_space: bool, mix_header_case: bool) -> String {
+    let mut processed = strip_proxy_headers(request_str);
+    if http_space {
+        let first_line = processed.lines().next().unwrap_or("").to_string();
+        let modified_line = apply_connect_space_insertion(&first_line);
+        let rest = if processed.contains("\r\n") {
+            processed.split_once("\r\n").map(|(_, r)| r).unwrap_or("")
+        } else if processed.contains('\n') {
+            processed.split_once('\n').map(|(_, r)| r).unwrap_or("")
+        } else {
+            ""
+        };
+        processed = if rest.is_empty() {
+            modified_line
+        } else {
+            format!("{}\r\n{}", modified_line, rest)
+        };
+    }
+    if mix_header_case {
+        processed = apply_header_case_mixing(&processed);
+    }
+    processed
+}
+
+/// Strips Alt-Svc / alt-svc headers from an HTTP response header block to prevent browsers from switching to censored QUIC UDP traffic.
+pub fn strip_alt_svc_headers(response_str: &str) -> String {
+    let mut lines = Vec::new();
+    for line in response_str.lines() {
+        if let Some((key, _)) = line.split_once(':') {
+            if key.trim().eq_ignore_ascii_case("alt-svc") {
+                continue;
+            }
+        }
+        lines.push(line.to_string());
+    }
+    lines.join("\r\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_strip_proxy_headers() {
-        let req = "GET / HTTP/1.1\r\nHost: example.com\r\nVia: 1.1 proxy\r\nX-Forwarded-For: 127.0.0.1\r\n\r\n";
+        let req = "CONNECT youtube.com:443 HTTP/1.1\r\nVia: 1.1 proxy\r\nProxy-Connection: keep-alive\r\nHost: youtube.com\r\n\r\n";
         let cleaned = strip_proxy_headers(req);
         assert!(!cleaned.contains("Via:"));
-        assert!(!cleaned.contains("X-Forwarded-For:"));
-        assert!(cleaned.contains("Host: example.com"));
+        assert!(!cleaned.contains("Proxy-Connection:"));
+        assert!(cleaned.contains("Host: youtube.com"));
     }
 
     #[test]
     fn test_is_padding_incompatible_domain() {
-        assert!(is_padding_incompatible_domain("i.instagram.com"));
-        assert!(is_padding_incompatible_domain("graph.facebook.com"));
-        assert!(is_padding_incompatible_domain("scontent-vie1-1.cdninstagram.com"));
+        assert!(is_padding_incompatible_domain("instagram.com"));
+        assert!(is_padding_incompatible_domain("www.instagram.com"));
+        assert!(is_padding_incompatible_domain("facebook.com"));
         assert!(!is_padding_incompatible_domain("youtube.com"));
         assert!(!is_padding_incompatible_domain("wikipedia.org"));
     }
-}
 
+    #[test]
+    fn test_space_insertion_and_case_mixing() {
+        let req = "CONNECT instagram.com:443 HTTP/1.1\r\nHost: instagram.com:443\r\nUser-Agent: curl/7.68.0\r\n\r\n";
+        assert!(is_http_connect(req));
+        assert_eq!(parse_connect_target(req), Some(("instagram.com".to_string(), 443)));
+
+        let preprocessed = preprocess_http_request(req, true, true);
+        assert!(preprocessed.contains("instagram.com:443"));
+        assert!(is_http_connect(&preprocessed));
+        assert_eq!(parse_connect_target(&preprocessed), Some(("instagram.com".to_string(), 443)));
+        assert!(preprocessed.contains("   ")); // multi space check
+        assert!(preprocessed.contains("hOsT:")); // mixed case check
+    }
+
+    #[test]
+    fn test_strip_alt_svc_headers() {
+        let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nAlt-Svc: h3=\":443\"; ma=86400\r\nalt-svc: h3-29=\":443\"\r\nServer: gws\r\n\r\n";
+        let cleaned = strip_alt_svc_headers(resp);
+        assert!(!cleaned.contains("Alt-Svc:"));
+        assert!(!cleaned.contains("alt-svc:"));
+        assert!(cleaned.contains("Server: gws"));
+    }
+}

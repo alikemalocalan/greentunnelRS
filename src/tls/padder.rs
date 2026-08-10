@@ -144,6 +144,66 @@ fn has_padding_extension(data: &[u8]) -> bool {
     false
 }
 
+/// Randomly permutes (shuffles) non-positional TLS ClientHello extensions to frustrate JA3/JA4 fingerprinting.
+pub fn permute_tls_extensions(data: &[u8]) -> Vec<u8> {
+    if !is_client_hello(data) {
+        return data.to_vec();
+    }
+
+    let ext_len_offset = match find_extensions_length_offset(data) {
+        Some(offset) => offset,
+        None => return data.to_vec(),
+    };
+
+    let ext_len = match read_u16(data, ext_len_offset) {
+        Some(len) => len as usize,
+        None => return data.to_vec(),
+    };
+
+    let mut pos = ext_len_offset + 2;
+    let end = pos + ext_len;
+    if end > data.len() {
+        return data.to_vec();
+    }
+
+    // Extract individual extension slices
+    let mut extensions: Vec<&[u8]> = Vec::new();
+    while pos + 4 <= end {
+        let ext_data_len = match read_u16(data, pos + 2) {
+            Some(l) => l as usize,
+            None => break,
+        };
+        let ext_total_len = 4 + ext_data_len;
+        if pos + ext_total_len > end {
+            break;
+        }
+        extensions.push(&data[pos..pos + ext_total_len]);
+        pos += ext_total_len;
+    }
+
+    if extensions.len() < 2 {
+        return data.to_vec();
+    }
+
+    // Fisher-Yates shuffle extensions
+    for i in (1..extensions.len()).rev() {
+        let j = rand::random_range(0..=i);
+        extensions.swap(i, j);
+    }
+
+    // Reconstruct ClientHello with permuted extensions
+    let mut result = Vec::with_capacity(data.len());
+    result.extend_from_slice(&data[..ext_len_offset + 2]);
+    for ext in extensions {
+        result.extend_from_slice(ext);
+    }
+    if data.len() > end {
+        result.extend_from_slice(&data[end..]);
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +242,13 @@ mod tests {
 
         let padded = pad(&original, DEFAULT_TARGET_SIZE);
         assert!(padded.ends_with(trailing));
+    }
+
+    #[test]
+    fn test_permute_tls_extensions() {
+        let original = build_synthetic_client_hello(Some("example.com"), true);
+        let permuted = permute_tls_extensions(&original);
+        assert_eq!(original.len(), permuted.len());
+        assert!(is_client_hello(&permuted));
     }
 }

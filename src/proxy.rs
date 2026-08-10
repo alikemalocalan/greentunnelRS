@@ -9,35 +9,45 @@ use crate::tls::{
     TLS_RECORD_HEADER_SIZE,
 };
 use crate::utils::{
-    is_http_connect, is_padding_incompatible_domain, parse_connect_target, random_delay,
-    split_and_write, strip_proxy_headers,
+    is_http_connect, is_padding_incompatible_domain, parse_connect_target, preprocess_http_request,
+    random_delay, split_and_write,
 };
 
 pub struct ProxyServerConfig {
     pub bind_addr: SocketAddr,
     pub aggressive_mode: bool,
-    pub doh_url: String,
+    pub dns_addr: String,
     pub disorder_mode: bool,
     pub fake_ttl: u32,
     pub fake_sni: String,
     pub window_shrink: usize,
+    pub http_space: bool,
+    pub mix_header_case: bool,
+    pub strip_alt_svc: bool,
+    pub port_rotate: bool,
+    pub ja4_permute: bool,
 }
 
 pub async fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
     let num_workers = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(2);
-    let resolver = Arc::new(DnsResolver::new(&config.doh_url));
+    let resolver = Arc::new(DnsResolver::new(&config.dns_addr));
     let config = Arc::new(config);
 
     tracing::info!(
-        "GreenTunnel Rust Proxy running on http://{} with {} CPU worker threads (AggressiveMode: {}, Disorder: {}, FakeTTL: {}, WindowShrink: {})",
+        "GreenTunnel Rust Proxy running on http://{} with {} CPU worker threads (AggressiveMode: {}, Disorder: {}, FakeTTL: {}, WindowShrink: {}, HttpSpace: {}, MixHeaderCase: {}, StripAltSvc: {}, PortRotate: {}, JA4Permute: {})",
         config.bind_addr,
         num_workers,
         config.aggressive_mode,
         config.disorder_mode,
         config.fake_ttl,
-        config.window_shrink
+        config.window_shrink,
+        config.http_space,
+        config.mix_header_case,
+        config.strip_alt_svc,
+        config.port_rotate,
+        config.ja4_permute
     );
 
     let mut handles = Vec::with_capacity(num_workers);
@@ -120,7 +130,7 @@ async fn handle_client(
     }
 
     let request_str = String::from_utf8_lossy(&buf[..n]);
-    let cleaned_request = strip_proxy_headers(&request_str);
+    let cleaned_request = preprocess_http_request(&request_str, config.http_space, config.mix_header_case);
 
     if is_http_connect(&cleaned_request) {
         let (host, port) = match parse_connect_target(&cleaned_request) {
@@ -161,7 +171,25 @@ async fn handle_client(
         };
 
         let remote_addr = SocketAddr::new(remote_ip, port);
-        let mut remote = match TcpStream::connect(remote_addr).await {
+
+        // TCP Source Port Rotation: bind socket to explicit ephemeral port to evade 4-tuple blackhole bans
+        let outbound_socket = if remote_addr.is_ipv6() {
+            tokio::net::TcpSocket::new_v6()?
+        } else {
+            tokio::net::TcpSocket::new_v4()?
+        };
+        outbound_socket.set_reuseaddr(true).ok();
+
+        if config.port_rotate {
+            let bind_zero: SocketAddr = if remote_addr.is_ipv6() {
+                "[::]:0".parse().unwrap()
+            } else {
+                "0.0.0.0:0".parse().unwrap()
+            };
+            outbound_socket.bind(bind_zero).ok();
+        }
+
+        let mut remote = match outbound_socket.connect(remote_addr).await {
             Ok(s) => s,
             Err(e) => {
                 tracing::error!("Failed to connect to remote {}:{}", host, e);
@@ -201,24 +229,26 @@ async fn handle_client(
             let raw_bytes = &client_hello_buf[..hello_len];
 
             // Fake Packet TTL Injection on a separate dummy probe socket to avoid main TLS stream corruption
-            if config.fake_ttl > 0 && is_client_hello(raw_bytes) {
-                if let Ok(mut fake_stream) = TcpStream::connect(remote_addr).await {
-                    fake_stream.set_ttl(config.fake_ttl).ok();
-                    let fake_hello = crate::tls::build_synthetic_client_hello(Some(&config.fake_sni), false);
-                    let _ = fake_stream.write_all(&fake_hello).await;
-                    let _ = fake_stream.flush().await;
-                    tracing::info!(
-                        "Fake TTL Packet injected on probe socket for {}: fake SNI {}, TTL {}",
-                        host,
-                        config.fake_sni,
-                        config.fake_ttl
-                    );
+            if config.fake_ttl > 0 && !is_padding_incompatible_domain(&host) && is_client_hello(raw_bytes) {
+                if let Ok(peer_addr) = remote.peer_addr() {
+                    if let Ok(mut fake_stream) = TcpStream::connect(peer_addr).await {
+                        fake_stream.set_ttl(config.fake_ttl).ok();
+                        let fake_hello = crate::tls::build_synthetic_client_hello(Some(&config.fake_sni), false);
+                        let _ = fake_stream.write_all(&fake_hello).await;
+                        let _ = fake_stream.flush().await;
+                        tracing::info!(
+                            "Fake TTL Packet injected on probe socket for {}: fake SNI {}, TTL {}",
+                            host,
+                            config.fake_sni,
+                            config.fake_ttl
+                        );
+                    }
                 }
             }
 
             // Step 1: Aggressive Mode Connection Padding (RFC 7685)
             // Skip padding for Meta/Facebook/Instagram domains because Meta's C++ Fizz TLS stack drops padded ClientHello records.
-            let bytes = if config.aggressive_mode
+            let mut bytes = if config.aggressive_mode
                 && !is_padding_incompatible_domain(&host)
                 && is_client_hello(raw_bytes)
             {
@@ -227,30 +257,52 @@ async fn handle_client(
                 raw_bytes.to_vec()
             };
 
+            // Dynamic JA4 Extension Permutation: randomize TLS extension ordering to defeat JA3/JA4 fingerprinting
+            if config.ja4_permute && is_client_hello(&bytes) {
+                bytes = crate::tls::permute_tls_extensions(&bytes);
+            }
+
             if let Some(sni_info) = find_sni_info(&bytes) {
                 if sni_info.hostname_length > 4 {
-                    let cut_in_sni = rand::random_range(3..=8.min(sni_info.hostname_length - 1));
+                    let cut_in_sni = if sni_info.hostname_length > 6 {
+                        let start_offset = if host.to_lowercase().starts_with("www.") { 4 } else { 0 };
+                        let domain_len = sni_info.hostname_length.saturating_sub(start_offset);
+                        let mid = start_offset + (domain_len / 2);
+                        let min_cut = (mid.saturating_sub(1)).max(start_offset + 2);
+                        let max_cut = (mid + 1).min(sni_info.hostname_length - 2);
+                        if min_cut <= max_cut {
+                            rand::random_range(min_cut..=max_cut)
+                        } else {
+                            sni_info.hostname_length / 2
+                        }
+                    } else {
+                        sni_info.hostname_length / 2
+                    };
                     let split_point = sni_info.hostname_offset + cut_in_sni;
 
                     if split_point > TLS_RECORD_HEADER_SIZE && split_point < bytes.len() {
                         let tls_records = fragment_at_offset(&bytes, split_point);
 
-                        // Send Record 1 (containing split SNI header) first with random TCP segmentation
+                        let is_meta = is_padding_incompatible_domain(&host);
+
+                        // Send Record 1 (split SNI) with TCP micro-segmentation
                         split_and_write(&tls_records[0], &mut remote).await?;
 
-                        // Fast inter-fragment delay (1-5ms) to trigger DPI reassembly timeout
-                        random_delay(1, 5).await;
-
-                        // Send remaining records (Record 2)
-                        for rec in &tls_records[1..] {
-                            remote.write_all(rec).await?;
+                        // Fast inter-fragment delay (1-5ms) to trigger DPI reassembly timeout unless Meta domain
+                        if !is_meta {
+                            random_delay(1, 5).await;
                         }
-                        remote.flush().await?;
+
+                        // Send remaining records (Record 2) with TCP micro-segmentation
+                        for rec in &tls_records[1..] {
+                            split_and_write(rec, &mut remote).await?;
+                        }
 
                         tracing::info!(
-                            "DPI Bypass applied for {}: split at byte {}, delay 1-5ms, {} TLS records",
+                            "DPI Bypass applied for {}: split at byte {}, delay {}, {} TLS records",
                             host,
                             split_point,
+                            if is_meta { "0ms (Meta)" } else { "1-5ms" },
                             tls_records.len()
                         );
 

@@ -31,17 +31,17 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 | **Out-of-Order (Disorder) TCP** | Sends TLS Record 2 before Record 1 to break stateful TSPU reassembly. | ✅ Implemented | ✅ Available (`-d`) | 🔶 **High** | ⚡ Negligible |
 | **Fake Packet TTL Injection** | Sends fake benign `ClientHello` with low TTL to mislead TSPU. | ✅ Implemented | ✅ Available (`-f / --set-ttl`) | 🔶 **High** | ⏱️ +1 RTT |
 | **TCP Window Size Shrinking** | Sets TCP socket buffer window size to force micro-segmentation. | ✅ Implemented | ✅ Available (`-w`) | 🟡 **Medium** | ⏱️ Minor handshake delay |
-| **TCP Source Port Rotation** | Rotates client TCP port on socket reset/timeout to evade 4-tuple blackhole bans. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Zero |
-| **QUIC Alt-Svc Stripping** | Strips `Alt-Svc` headers to enforce TCP TLS 1.3 over censored QUIC UDP. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Zero |
+| **TCP Source Port Rotation** | Rotates client TCP port on socket connection to evade 4-tuple blackhole bans. | ✅ Implemented | ✅ Enabled by default (`-R`) | 🔥 **Critical (High)** | ⚡ Zero |
+| **QUIC Alt-Svc Stripping** | Strips `Alt-Svc` headers to enforce TCP TLS 1.3 over censored QUIC UDP. | ✅ Implemented | ✅ Enabled by default (`-s`) | 🔥 **Critical (High)** | ⚡ Zero |
 | **Post-Quantum TLS 1.3 (ML-KEM)** | Supports hybrid ML-KEM-768 Kyber KeyShare extensions to defeat quantum & PQC-aware DPI. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Zero |
-| **Dynamic JA4 Randomization** | Randomizes TLS extension ordering and cipher suites to frustrate JA3/JA4 fingerprinting. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⚡ Zero |
+| **Dynamic JA4 Randomization** | Randomizes TLS ClientHello extension ordering to frustrate JA3/JA4 fingerprinting. | ✅ Implemented | ✅ Enabled by default (`-J`) | 🔶 **High** | ⚡ Zero |
 | **UDP-over-TCP (UoT) Mode** | Encapsulates UDP frames inside length-prefixed TCP streams when UDP is blocked. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔥 **Critical (High)** | ⚡ Negligible |
 | **Active Probing Fallback Target** | Proxies unauthorized ISP scanner bot probes to a local web server (Nginx/404). | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⚡ Zero |
 | **TLS Extension Permutation** | Randomizes TLS extension ordering to prevent static client fingerprinting. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⚡ Zero |
 | **DNS Type 65 Filtering** | Filters malicious DNS `HTTPS` (type 65) records injected by ISP DNS poisoning. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⚡ Zero |
 | **Statistical Traffic Masking** | Transmits low-volume background noise to multiple CDN IPs to confuse flow frequency analyzers. | 🚧 *Planned (Roadmap)* | ❌ Not Supported | 🔶 **High** | ⏱️ <11 Kbps noise |
-| **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | 🚧 *Planned (Roadmap)* | ✅ Available (`-h / -H`) | 🟡 **Medium** | ⚡ Zero |
-| **HTTP CONNECT Space Insertion** | Inserts extra spaces in CONNECT requests to confuse DPI regex splitters. | 🚧 *Planned (Roadmap)* | ✅ Available (`-e`) | 🟡 **Medium** | ⚡ Zero |
+| **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | ✅ Implemented | ✅ Enabled by default (`-m`) | 🟡 **Medium** | ⚡ Zero |
+| **HTTP CONNECT Space Insertion** | Inserts extra spaces in CONNECT requests to confuse DPI regex splitters. | ✅ Implemented | ✅ Enabled by default (`-e`) | 🟡 **Medium** | ⚡ Zero |
 | **FQDN Trailing Dot Obfuscation** | Appends trailing dot (`example.com.`) to break exact domain filters. | 🚧 *Planned (Roadmap)* | ✅ Available | 🟡 **Medium** | ⚡ Zero |
 | **Auto HTTPS Redirection (Port 80)** | Intercepts plaintext HTTP and issues 301 redirect to encrypted HTTPS. | 🚧 *Planned (Roadmap)* | ✅ Available (`-r`) | 🔶 **High** | ⚡ Faster handshake |
 | **DNSCrypt Protocol Support** | Curve25519 authenticated UDP/TCP DNS resolution over Port 443 without TLS SNI. | 🚧 *Planned (Roadmap)* | ❌ N/A (External) | 🔶 **High** | ⏱️ +80-120KB binary |
@@ -72,7 +72,7 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 | `--fake-ttl` | `-F` | `0` | Injects fake ClientHello with low socket TTL to mislead DPI middleboxes (0 = disabled). |
 | `--fake-sni` | - | `google.com` | Benign domain name used for fake ClientHello injection. |
 | `--window-shrink` | `-W` | `0` | Restricts TCP socket buffer window size to force micro-segmentation (0 = disabled). |
-| `--doh-url` | `-d` | `127.0.0.1:53` | DNS resolver server IP:port (`127.0.0.1:53` for local loopback / dnscrypt-proxy). |
+| `--dns-addr` | `-d` | `127.0.0.1:53` | DNS resolver server IP:port (`127.0.0.1:53` for local loopback / dnscrypt-proxy / dnsmasq). |
 | `--verbose` | `-v` | `false` | Enables verbose debug log output. |
 | `--help` | `-h` | - | Prints help and parameter information. |
 | `--version` | `-V` | - | Prints version information. |
@@ -94,8 +94,8 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 - **`-b, --bind <IP>`**:  
   Use `127.0.0.1` (default) for localhost proxying. Set to `0.0.0.0` when deploying on a home router (OpenWrt) or server to serve all clients on your local network.
 
-- **`-d, --doh-url <URL>`**:  
-  Configures the DNS-over-HTTPS resolver URL (e.g. `https://dns.google/resolve` or `https://cloudflare-dns.com/dns-query`) to bypass DNS poisoning and censorship.
+- **`-d, --dns-addr <IP:PORT>`**:  
+  Configures local or remote UDP DNS resolver IP:port (e.g. `127.0.0.1:53` or `127.0.0.1:55` for dnscrypt-proxy) to bypass DNS poisoning and censorship.
 
 - **`-v, --verbose`**:  
   Enables detailed debug level logs, useful for inspecting connection handling and DPI bypass operations in real-time.
@@ -124,8 +124,8 @@ cargo build --release
 # Run with Aggressive Mode, custom port, and verbose logging
 ./target/release/greentunnelRS --port 8080 --aggressive --verbose
 
-# Run on OpenWrt / Router (listen on all network interfaces with custom DoH provider)
-./target/release/greentunnelRS --bind 0.0.0.0 --port 8080 --aggressive --doh-url "https://cloudflare-dns.com/dns-query"
+# Run on OpenWrt / Router (listen on all network interfaces with local dnscrypt-proxy)
+./target/release/greentunnelRS --bind 0.0.0.0 --port 8080 --dns-addr "127.0.0.1:55"
 ```
 
 ---

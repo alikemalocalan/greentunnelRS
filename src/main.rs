@@ -34,11 +34,16 @@ async fn main() -> anyhow::Result<()> {
     let config = ProxyServerConfig {
         bind_addr,
         aggressive_mode: cli.aggressive,
-        doh_url: cli.doh_url,
+        dns_addr: cli.dns_addr,
         disorder_mode: cli.disorder,
         fake_ttl: cli.fake_ttl,
         fake_sni: cli.fake_sni,
         window_shrink: cli.window_shrink,
+        http_space: cli.http_space,
+        mix_header_case: cli.mix_header_case,
+        strip_alt_svc: cli.strip_alt_svc,
+        port_rotate: cli.port_rotate,
+        ja4_permute: cli.ja4_permute,
     };
 
     run_server(config).await?;
