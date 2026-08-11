@@ -6,10 +6,8 @@ pub trait Parser {
 pub struct Cli {
     pub port: u16,
     pub bind: String,
-    pub tls_padding: bool,
     pub dns_addr: String,
     pub verbose: bool,
-    pub disorder: bool,
     pub fake_ttl: u32,
     pub fake_sni: String,
     pub window_shrink: usize,
@@ -19,7 +17,6 @@ pub struct Cli {
     pub port_rotate: bool,
     pub trailing_dot: bool,
     pub filter_type65: bool,
-    pub post_quantum: bool,
     pub fallback_target: String,
 }
 
@@ -27,10 +24,8 @@ impl Parser for Cli {
     fn parse() -> Self {
         let mut port = 8080;
         let mut bind = "127.0.0.1".to_string();
-        let mut tls_padding = false;
         let mut dns_addr = "127.0.0.1:53".to_string();
         let mut verbose = false;
-        let mut disorder = true;
         let mut fake_ttl = 0;
         let mut fake_sni = "".to_string();
         let mut window_shrink = 0;
@@ -40,7 +35,6 @@ impl Parser for Cli {
         let mut port_rotate = true;
         let mut trailing_dot = true;
         let mut filter_type65 = true;
-        let mut post_quantum = false;
         let mut fallback_target = "127.0.0.1:80".to_string();
 
         let args: Vec<String> = std::env::args().collect();
@@ -61,7 +55,6 @@ impl Parser for Cli {
                         i += 1;
                     }
                 }
-                "-P" | "--tls-padding" | "-a" | "--aggressive" => tls_padding = true,
                 "-d" | "--dns-addr" | "--doh-url" => {
                     if i + 1 < args.len() {
                         dns_addr = args[i + 1].clone();
@@ -69,14 +62,12 @@ impl Parser for Cli {
                     }
                 }
                 "-v" | "--verbose" => verbose = true,
-                "-D" | "--disorder" => disorder = true,
                 "-e" | "--http-space" => http_space = true,
                 "-m" | "--mix-header-case" => mix_header_case = true,
                 "-s" | "--strip-alt-svc" => strip_alt_svc = true,
                 "-R" | "--port-rotate" => port_rotate = true,
                 "-t" | "--trailing-dot" => trailing_dot = true,
                 "-T" | "--filter-type65" => filter_type65 = true,
-                "-Q" | "--post-quantum" => post_quantum = true,
                 "--fallback-target" => {
                     if i + 1 < args.len() {
                         fallback_target = args[i + 1].clone();
@@ -121,10 +112,8 @@ impl Parser for Cli {
         Self {
             port,
             bind,
-            tls_padding,
             dns_addr,
             verbose,
-            disorder,
             fake_ttl,
             fake_sni,
             window_shrink,
@@ -134,7 +123,6 @@ impl Parser for Cli {
             port_rotate,
             trailing_dot,
             filter_type65,
-            post_quantum,
             fallback_target,
         }
     }
@@ -149,15 +137,12 @@ Usage: greentunnelRS [OPTIONS]
 Options:
   -p, --port <PORT>             Port to listen on [default: 8080]
   -b, --bind <IP>               Bind IP address (e.g. 127.0.0.1 or 0.0.0.0) [default: 127.0.0.1]
-  -P, --tls-padding             Enable TLS ClientHello Padding (RFC 7685)
-  -D, --disorder                Enable Out-of-Order TCP Disorder transmission
   -e, --http-space              Enable HTTP CONNECT extra space insertion desynchronization
   -m, --mix-header-case         Enable HTTP header key case mixing desynchronization
   -s, --strip-alt-svc           Strip Alt-Svc headers to enforce TCP TLS 1.3 over censored QUIC UDP [default: true]
   -R, --port-rotate             Enable TCP source port rotation on connection retries [default: true]
   -t, --trailing-dot            Append root FQDN trailing dot (example.com.) to break DPI regex filters
   -T, --filter-type65           Filter out poisoned DNS Type 65 (HTTPS/SVCB) records [default: true]
-  -Q, --post-quantum            Enable Post-Quantum TLS 1.3 ML-KEM-768 extension support
       --fallback-target <IP:PORT> Active probing fallback response target [default: 127.0.0.1:80]
   -F, --fake-ttl <TTL>          Inject fake ClientHello with specified TTL [default: 0 (disabled)]
       --fake-sni <DOMAIN>       Benign domain name for fake ClientHello injection [default: disabled]
@@ -174,8 +159,8 @@ Examples:
   # Run with Fake TTL Packet Injection enabled (fake google.com SNI with TTL 5):
   greentunnelRS --port 8080 --fake-ttl 5 --fake-sni google.com
 
-  # Advanced DPI bypass with TLS Padding, Disorder Mode, and Fake TTL:
-  greentunnelRS -P -D -F 5 --fake-sni google.com -d 127.0.0.1:53"#
+  # Advanced DPI bypass with Fake TTL and DNS:
+  greentunnelRS -F 5 --fake-sni google.com -d 127.0.0.1:53"#
     );
 }
 
@@ -188,10 +173,8 @@ mod tests {
         let cli = Cli {
             port: 8080,
             bind: "127.0.0.1".to_string(),
-            tls_padding: false,
             dns_addr: "127.0.0.1:53".to_string(),
             verbose: false,
-            disorder: true,
             fake_ttl: 0,
             fake_sni: "".to_string(),
             window_shrink: 0,
@@ -201,14 +184,12 @@ mod tests {
             port_rotate: true,
             trailing_dot: true,
             filter_type65: true,
-            post_quantum: false,
             fallback_target: "127.0.0.1:80".to_string(),
         };
         assert_eq!(cli.port, 8080);
         assert_eq!(cli.bind, "127.0.0.1");
         assert_eq!(cli.dns_addr, "127.0.0.1:53");
         assert_eq!(cli.fake_sni, "");
-        assert!(!cli.tls_padding);
         assert_eq!(cli.fake_ttl, 0);
         assert_eq!(cli.window_shrink, 0);
         assert!(cli.http_space);
@@ -217,7 +198,6 @@ mod tests {
         assert!(cli.port_rotate);
         assert!(cli.trailing_dot);
         assert!(cli.filter_type65);
-        assert!(!cli.post_quantum);
         assert_eq!(cli.fallback_target, "127.0.0.1:80");
     }
 }

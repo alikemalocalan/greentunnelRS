@@ -6,8 +6,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 use crate::dns::DnsResolver;
 use crate::tls::{
-    find_sni_info, fragment_at_offset, has_post_quantum_extension, is_client_hello,
-    pad_client_hello, TlsRecordSlice, DEFAULT_TARGET_SIZE, TLS_RECORD_HEADER_SIZE,
+    find_sni_info, fragment_at_offset, is_client_hello, TlsRecordSlice, TLS_RECORD_HEADER_SIZE,
 };
 use crate::utils::{
     is_http_connect, is_padding_incompatible_domain, parse_connect_target, preprocess_http_request,
@@ -16,9 +15,7 @@ use crate::utils::{
 
 pub struct ProxyServerConfig {
     pub bind_addr: SocketAddr,
-    pub tls_padding: bool,
     pub dns_addr: String,
-    pub disorder_mode: bool,
     pub fake_ttl: u32,
     pub fake_sni: String,
     pub window_shrink: usize,
@@ -28,7 +25,6 @@ pub struct ProxyServerConfig {
     pub port_rotate: bool,
     pub trailing_dot: bool,
     pub filter_type65: bool,
-    pub post_quantum: bool,
     pub fallback_target: String,
 }
 
@@ -43,11 +39,9 @@ pub fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
     let config = Arc::new(config);
 
     tracing::info!(
-        "GreenTunnel Rust Proxy running on http://{} with {} Thread-per-Core workers (SO_REUSEPORT, current_thread) (TLSPadding: {}, Disorder: {}, FakeTTL: {}, WindowShrink: {}, HttpSpace: {}, MixHeaderCase: {}, StripAltSvc: {}, PortRotate: {}, TrailingDot: {}, FilterType65: {}, PostQuantum: {}, FallbackTarget: {})",
+        "GreenTunnel Rust Proxy running on http://{} with {} Thread-per-Core workers (SO_REUSEPORT, current_thread) (FakeTTL: {}, WindowShrink: {}, HttpSpace: {}, MixHeaderCase: {}, StripAltSvc: {}, PortRotate: {}, TrailingDot: {}, FilterType65: {}, FallbackTarget: {})",
         config.bind_addr,
         num_workers,
-        config.tls_padding,
-        config.disorder_mode,
         config.fake_ttl,
         config.window_shrink,
         config.http_space,
@@ -56,7 +50,6 @@ pub fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
         config.port_rotate,
         config.trailing_dot,
         config.filter_type65,
-        config.post_quantum,
         config.fallback_target
     );
 
@@ -181,9 +174,7 @@ async fn handle_client(
                 raw_host,
                 port
             );
-            client
-                .write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n")
-                .await?;
+            client.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n").await?;
             return Ok(());
         }
 
@@ -225,9 +216,7 @@ async fn handle_client(
                 port,
                 remote_ip
             );
-            client
-                .write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n")
-                .await?;
+            client.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n").await?;
             return Ok(());
         }
 
@@ -314,24 +303,7 @@ async fn handle_client(
 
             // Separate the first TLS record (ClientHello) from any trailing buffer data
             let (raw_ch, trailing_data) = extract_first_tls_record(raw_bytes);
-
-            // Step 1: TLS ClientHello Padding (RFC 7685)
-            let bytes = if config.tls_padding
-                && !is_padding_incompatible_domain(&host)
-                && is_client_hello(raw_ch)
-            {
-                pad_client_hello(raw_ch, DEFAULT_TARGET_SIZE)
-            } else {
-                raw_ch.to_vec()
-            };
-
-
-            if config.post_quantum && has_post_quantum_extension(raw_ch) {
-                tracing::info!(
-                    "Post-Quantum ML-KEM-768 TLS 1.3 Key Share detected for {}",
-                    host
-                );
-            }
+            let bytes = raw_ch.to_vec();
 
             if let Some(sni_info) = find_sni_info(&bytes) {
                 if sni_info.hostname_length > 4 {
@@ -348,7 +320,6 @@ async fn handle_client(
                             rec2.as_ref(),
                             trailing_data,
                             is_meta,
-                            config.disorder_mode,
                         )
                         .await?;
 
@@ -506,7 +477,6 @@ async fn transmit_tls_records(
     rec2: Option<&TlsRecordSlice<'_>>,
     trailing_data: &[u8],
     is_meta: bool,
-    _disorder_mode: bool,
 ) -> anyhow::Result<()> {
     // Record 1 (containing first half of SNI) must be transmitted first using vectored I/O
     write_all_vectored(remote, &[&rec1.header[..], rec1.payload]).await?;

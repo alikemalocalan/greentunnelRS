@@ -94,6 +94,7 @@ pub fn find_sni_info(data: &[u8]) -> Option<SniInfo> {
 }
 
 /// Locates the byte offset of the Extensions Length (2 bytes) field in ClientHello.
+#[allow(dead_code)]
 pub fn find_extensions_length_offset(data: &[u8]) -> Option<usize> {
     if data.len() < 44 {
         return None;

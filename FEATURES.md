@@ -48,12 +48,11 @@ The censorship system operates directly at the ISP level using centralized **TSP
    - **How it works:** Parses the binary TLS `ClientHello` record and cuts the payload directly inside the middle of the SNI hostname string (e.g., `you` | `tube.com`).
    - **DPI Impact:** Frustrates single-packet SNI pattern matching.
 
-2. **Proportional & Dynamic TLS ClientHello Padding (RFC 7685)**
-   - **How it works:** Adds a dynamic TLS Padding extension (`0x0015`) proportional to the original ClientHello payload size (`max +32..128B`).
-   - **DPI Impact:** Prevents static packet size fingerprinting while avoiding fixed 512-byte signatures.
+2. **Proportional & Dynamic TLS ClientHello Padding (RFC 7685)** ❌ *Removed*
+   - **Why removed:** Modifying `ClientHello` content (including adding RFC 7685 padding) in non-MITM transparent proxy mode alters the TLS 1.3 transcript hash, breaking handshake integrity. SNI midpoint record splitting provides 100% effective DPI bypass without payload modification.
 
 3. **Domain-Aware Incompatibility Filtering (Meta / Fizz TLS Bypass)**
-   - **How it works:** Automatically detects domains using strict C++ TLS stacks (e.g. `instagram.com`, `facebook.com`, `whatsapp.com`) and skips TLS padding for them while retaining SNI record splitting.
+   - **How it works:** Handles strict C++ TLS stacks (e.g. `instagram.com`, `facebook.com`, `whatsapp.com`) by skipping inter-fragment delays while maintaining SNI record splitting.
    - **Impact:** Prevents Meta server-side TCP connection resets while maintaining 100% ISP DPI bypass.
 
 ### ⚡ TCP Layer Evasion
@@ -65,12 +64,11 @@ The censorship system operates directly at the ISP level using centralized **TSP
    - **How it works:** Introduces a tiny 1–5ms delay between TLS Record 1 and Record 2.
    - **DPI Impact:** Causes TSPU reassembly buffer timeouts while avoiding video stream buffering for users.
 
-6. **Out-of-Order (Disorder) TCP Segment Transmission *(Roadmap)***
-   - **How it works:** Sends TCP Segment 2 *before* Segment 1.
-   - **DPI Impact:** Triggers reassembly failure in simple DPI state machines while the client/server OS TCP stack correctly re-orders the stream.
+6. **Out-of-Order (Disorder) TCP Segment Transmission** ❌ *Removed*
+   - **Why removed:** In a userspace HTTP/CONNECT proxy using standard socket APIs (`SOCK_STREAM`), the OS kernel TCP stack controls packet sequence ordering. True out-of-order segment injection is impossible without raw sockets or a TUN kernel driver.
 
-7. **Fake Packet Injection with Low TTL / Bad Checksum *(Roadmap)***
-   - **How it works:** Transmits a fake `ClientHello` with a benign domain (e.g. `google.com`) and a short TTL (or invalid TCP checksum) before sending the real payload.
+7. **Fake Packet Injection with Low TTL / Bad Checksum**
+   - **How it works:** Transmits a fake `ClientHello` with a benign domain (e.g. `google.com`) and a short TTL before sending the real payload.
    - **DPI Impact:** Causes TSPU to inspect and validate the fake packet, ignoring the real connection.
 
 ### 🌐 DNS & Transport Evasion
@@ -95,7 +93,7 @@ The censorship system operates directly at the ISP level using centralized **TSP
     - **DPI Impact:** Prevents ISP middleboxes from actively probing and fingerprinting the proxy server.
 
 13. **TLS Extension Permutation (Dynamic JA4 Randomization)** ❌ *Removed*
-    - **Why removed:** A transparent (non-MITM) proxy cannot modify `ClientHello` content without breaking the TLS 1.3 transcript hash. Both client and server maintain a running hash of all handshake messages; any byte-level change (including extension reordering) causes a MAC mismatch (`SSL_ERROR_BAD_MAC_READ`). Tools like ByeDPI/Zapret use the same architectural approach and do not attempt JA4 modification — they rely on TCP-level fragmentation to prevent DPI from reading the `ClientHello` at all.
+    - **Why removed:** A transparent (non-MITM) proxy cannot modify `ClientHello` content without breaking the TLS 1.3 transcript hash. Both client and server maintain a running hash of all handshake messages; any byte-level change (including extension reordering) causes a MAC mismatch (`SSL_ERROR_BAD_MAC_READ`).
 
 14. **Statistical Traffic Masking (Background Noise Obfuscation) *(Roadmap)*** [sivpn]
     - **How it works:** Transmits low-overhead (11 Kbps) dummy background probe packets to multiple benign global CDN IP addresses outside the tunnel.
@@ -109,9 +107,8 @@ The censorship system operates directly at the ISP level using centralized **TSP
     - **How it works:** Serves realistic Nginx 404 HTML server banner on unauthorized/scanner active probes (`--fallback-target`).
     - **DPI Impact:** Renders the proxy server completely indistinguishable from a standard benign web server during ISP active probe scans.
 
-17. **Post-Quantum TLS 1.3 Key Exchange Readiness (ML-KEM-768)** [qeli]
-    - **How it works:** Supports Post-Quantum hybrid `KeyShare` extensions (`0x11ec` / ML-KEM-768 Kyber) in padded `ClientHello` headers (`-Q` / `--post-quantum`).
-    - **DPI Impact:** Prevents DPI devices from flagging connections lacking post-quantum extensions and future-proofs against quantum decryption.
+17. **Post-Quantum TLS 1.3 Key Exchange Support** ❌ *Removed*
+    - **Why removed:** Passive log inspection of ML-KEM-768 key shares provided no active evasion benefit, and transparent payload modification is cryptographically prohibited by TLS 1.3 integrity checks.
 
 18. **DNS Type 65 (HTTPS/SVCB) Record Filtering**
     - **How it works:** Filters out malicious DNS Type 65 (`HTTPS`) and Type 64 (`SVCB`) resource records from DNS query responses (`-T` / `--filter-type65`).
@@ -129,18 +126,18 @@ The censorship system operates directly at the ISP level using centralized **TSP
 | :--- | :--- | :---: | :---: | :---: |
 | **SNI Midpoint Record Splitting** | Cuts TLS `ClientHello` inside hostname string across 2 TLS records. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Negligible (<1ms) |
 | **Zero-Dependency Local UDP DNS** | Queries local DNS (`127.0.0.1:53` / `dnscrypt-proxy`) with instant cache. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Sub-millisecond (<0.2ms) |
-| **Domain-Aware Meta Filter** | Skips TLS padding for Meta/Instagram to avoid C++ Fizz TLS drops. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Zero |
-| **Proportional TLS Padding** | Adds dynamic +32..128B RFC 7685 padding based on ClientHello length. | ✅ Implemented | 🔶 **High** | ⚡ Negligible |
+| **Domain-Aware Meta Filter** | Skips inter-fragment delay for Meta/Instagram to avoid connection resets. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Zero |
+| **Proportional TLS Padding** | ClientHello extension padding. | ❌ Removed (TLS 1.3 incompatible) | 🔶 **N/A** | ⚡ N/A |
 | **Fast Inter-Fragment Delay (1-5ms)** | Triggers TSPU reassembly buffer timeout between TLS records. | ✅ Implemented | 🔶 **High** | ⏱️ 1–5ms handshake |
 | **Linux SO_REUSEPORT Multi-Worker** | Distributes socket accept loops across all CPU cores on Linux/OpenWrt. | ✅ Implemented | 🔶 **High** | ⚡ Max Throughput |
 | **TCP_NODELAY Socket Tuning** | Flushes SNI split packets immediately, overriding OS Nagle delay. | ✅ Implemented | 🟡 **Medium** | ⚡ Improves latency |
 | **Proxy Header Stripping** | Removes `Via`, `X-Forwarded-For`, `Proxy-Connection` headers. | ✅ Implemented | 🟡 **Medium** | ⚡ Zero |
-| **Out-of-Order (Disorder) TCP** | Sends TLS Record 2 before Record 1 to break stateful TSPU reassembly. | ✅ Implemented | 🔶 **High** | ⚡ Negligible |
+| **Out-of-Order (Disorder) TCP** | Out-of-order TCP segment injection. | ❌ Removed (Kernel socket API limited) | 🔶 **N/A** | ⚡ N/A |
 | **Fake Packet TTL Injection** | Sends fake benign `ClientHello` with low TTL to mislead TSPU. | ✅ Implemented | 🔶 **High** | ⏱️ +1 RTT |
 | **TCP Window Size Shrinking** | Sets TCP socket buffer window size to force micro-segmentation. | ✅ Implemented | 🟡 **Medium** | ⏱️ Minor handshake delay |
 | **TCP Source Port Rotation** | Rotates client TCP port on socket connection to evade 4-tuple blackhole bans. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Zero |
 | **QUIC Alt-Svc Stripping** | Strips `Alt-Svc` headers to enforce TCP TLS 1.3 over censored QUIC UDP. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Zero |
-| **Post-Quantum TLS 1.3 (ML-KEM)** | Supports hybrid ML-KEM-768 Kyber KeyShare extensions to defeat quantum & PQC-aware DPI. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Zero |
+| **Post-Quantum TLS 1.3 (ML-KEM)** | ML-KEM-768 extension inspection. | ❌ Removed (No evasion value) | 🔶 **N/A** | ⚡ N/A |
 | **Dynamic JA4 Randomization** | Randomized TLS ClientHello extension ordering. | ❌ Removed (TLS 1.3 incompatible) | 🔶 **N/A** | ⚡ N/A |
 | **Active Probing Fallback Target** | Serves realistic Nginx 404 HTML server banner on ISP scanner active probes. | ✅ Implemented | 🔶 **High** | ⚡ Zero |
 | **DNS Type 65 Filtering** | Filters malicious DNS `HTTPS` (type 65) records injected by ISP DNS poisoning. | ✅ Implemented | 🔶 **High** | ⚡ Zero |

@@ -9,8 +9,7 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 
 - ⚡ **SNI-Targeted Fragmentation:** Parses TLS ClientHello binary records and splits SNI hostname at the midpoint to bypass Deep Packet Inspection (DPI).
 - 🔒 **TLS Record Layer Fragmentation:** Performs Layer 5 TLS record splitting.
-- ⏱️ **Inter-Fragment Delay:** Introduces a 1–30ms timing gap between TLS records to trigger DPI reassembly timeouts (e.g. TSPU / Iran DPI).
-- 🛡️ **Aggressive Mode (Connection Padding):** Pads small TLS ClientHello records to 512 bytes (RFC 7685) to frustrate size-based fingerprinting.
+- ⏱️ **Inter-Fragment Delay:** Introduces a 1–5ms timing gap between TLS records to trigger DPI reassembly timeouts (e.g. TSPU / Russia DPI).
 - 🌐 **Zero-Dependency Local UDP DNS:** Queries local loopback (`127.0.0.1:53` / `dnscrypt-proxy`) with sub-millisecond (<0.2ms) response times and in-memory TTL caching.
 - 🚀 **Ultra-Lightweight & Fast:** Built with `tokio` async runtime and Linux `SO_REUSEPORT` multi-core CPU worker pool, minimal RAM (<10 MB), and ultra-small binary size (~748 KB), perfect for OpenWrt routers (e.g. GL.iNet Beryl AX).
 
@@ -22,17 +21,14 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 | :--- | :--- | :---: | :---: | :---: | :---: |
 | **SNI Midpoint Record Splitting** | Cuts TLS `ClientHello` inside hostname string across 2 TLS records. | ✅ Implemented | ✅ Available (`-s`) | 🔥 **Critical (High)** | ⚡ Negligible (<1ms) |
 | **Zero-Dependency Local UDP DNS** | Queries local DNS (`127.0.0.1:53` / `dnscrypt-proxy`) with instant cache. | ✅ Implemented | ✅ Available (`--dns-addr`) | 🔥 **Critical (High)** | ⚡ Sub-millisecond (<0.2ms) |
-| **Domain-Aware Meta Filter** | Skips TLS padding for Meta/Instagram to avoid C++ Fizz TLS drops. | ✅ Implemented | ❌ N/A (Global Rules) | 🔥 **Critical (High)** | ⚡ Zero |
-| **Proportional TLS Padding** | Adds dynamic +32..128B RFC 7685 padding based on ClientHello length. | ✅ Implemented | ❌ Not Supported | 🔶 **High** | ⚡ Negligible |
+| **Domain-Aware Meta Filter** | Skips inter-fragment delay for Meta/Instagram to avoid connection resets. | ✅ Implemented | ❌ N/A (Global Rules) | 🔥 **Critical (High)** | ⚡ Zero |
 | **Fast Inter-Fragment Delay (1-5ms)** | Triggers TSPU reassembly buffer timeout between TLS records. | ✅ Implemented | ❌ Not Supported | 🔶 **High** | ⏱️ 1–5ms handshake |
 | **Linux SO_REUSEPORT Multi-Worker** | Distributes socket accept loops across all CPU cores on Linux/OpenWrt. | ✅ Implemented | ❌ N/A (Windows Only) | 🔶 **High** | ⚡ Max Throughput |
 | **TCP_NODELAY Socket Tuning** | Flushes SNI split packets immediately, overriding OS Nagle delay. | ✅ Implemented | ❌ N/A (WinDivert Layer) | 🟡 **Medium** | ⚡ Improves latency |
 | **Proxy Header Stripping** | Removes `Via`, `X-Forwarded-For`, `Proxy-Connection` headers. | ✅ Implemented | ✅ Available (`-h`) | 🟡 **Medium** | ⚡ Zero |
-| **Out-of-Order (Disorder) TCP** | Sends TLS Record 2 before Record 1 to break stateful TSPU reassembly. | ✅ Implemented | ✅ Available (`-d`) | 🔶 **High** | ⚡ Negligible |
 | **Fake Packet TTL Injection** | Sends fake benign `ClientHello` with low TTL to mislead TSPU. | ✅ Implemented | ✅ Available (`-f / --set-ttl`) | 🔶 **High** | ⏱️ +1 RTT |
 | **TCP Window Size Shrinking** | Sets TCP socket buffer window size to force micro-segmentation. | ✅ Implemented | ✅ Available (`-w`) | 🟡 **Medium** | ⏱️ Minor handshake delay |
 | **TCP Source Port Rotation** | Rotates client TCP port on socket connection to evade 4-tuple blackhole bans. | ✅ Implemented | ✅ Enabled by default (`-R`) | 🔥 **Critical (High)** | ⚡ Zero |
-| **Post-Quantum TLS 1.3 (ML-KEM)** | Supports hybrid ML-KEM-768 Kyber KeyShare extensions to defeat quantum & PQC-aware DPI. | ✅ Implemented | ✅ Enabled by default (`-Q`) | 🔥 **Critical (High)** | ⚡ Zero |
 | **Active Probing Fallback Target** | Serves realistic Nginx 404 HTML server banner on ISP scanner active probes. | ✅ Implemented | ✅ Available (`--fallback-target`) | 🔶 **High** | ⚡ Zero |
 | **DNS Type 65 Filtering** | Filters malicious DNS `HTTPS` (type 65) records injected by ISP DNS poisoning. | ✅ Implemented | ✅ Enabled by default (`-T`) | 🔶 **High** | ⚡ Zero |
 | **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | ✅ Implemented | ✅ Enabled by default (`-m`) | 🟡 **Medium** | ⚡ Zero |
@@ -51,8 +47,8 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 | :--- | :--- | :--- |
 | **Operating Layer** | **Layer 3 / 4 (Network & Transport)** — Operates as a kernel-level packet filter (WinDivert driver). | **Layer 4 / 7 (Transport & Application)** — Operates as an intelligent user-space proxy server. |
 | **OS Compatibility** | 🪟 **Windows Only** (requires WinDivert kernel driver). | 🐧 **Cross-Platform** (OpenWrt routers, Linux servers, macOS, Windows). |
-| **TLS Protocol Awareness** | Reads raw TCP bytes without deep TLS record parsing. | Parses Layer 7 `ClientHello` structures, applies RFC 7685 padding, and cuts SNI hostnames dynamically. |
-| **Domain-Specific Filtering** | Applies global packet manipulation rules to all TCP traffic. | Detects target domains (e.g., Meta/Instagram Fizz TLS bypass) and adjusts padding rules automatically. |
+| **TLS Protocol Awareness** | Reads raw TCP bytes without deep TLS record parsing. | Parses Layer 7 `ClientHello` structures and cuts SNI hostnames dynamically across TLS records without modifying handshake payload. |
+| **Domain-Specific Filtering** | Applies global packet manipulation rules to all TCP traffic. | Detects target domains (e.g., Meta/Instagram TLS handling) and adjusts inter-fragment delays automatically. |
 | **CPU Scaling** | Single-threaded packet interception via WinDivert driver loop. | Linux `SO_REUSEPORT` multi-worker pool scaling across all CPU cores (e.g., dual/quad-core OpenWrt routers). |
 | **Setup Overhead** | Requires Administrator / Kernel Driver installation on Windows. | Zero driver installation; runs as a portable standalone binary (~748 KB). |
 
@@ -64,19 +60,16 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 |------|-------|---------|-------------|
 | `--port` | `-p` | `8080` | Local port for the proxy server to listen on. |
 | `--bind` | `-b` | `127.0.0.1` | IP address to bind (`0.0.0.0` to allow LAN/router clients). |
-| `--tls-padding` | `-P` | `true` | Enables **TLS ClientHello Padding** (RFC 7685) to defeat payload length inspection. (Alias: `-a`, `--aggressive`) |
-| `--disorder` | `-D` | `true` | Enables **TCP Disorder Mode** (sends TLS Record 2 before Record 1 to defeat stateful DPI reassembly). |
-| `--fake-ttl` | `-F` | `0` | Injects fake ClientHello with low socket TTL to mislead DPI middleboxes (0 = disabled). |
-| `--fake-sni` | - | `disabled` | Benign domain name used for fake ClientHello injection (e.g. `google.com`). |
-| `--window-shrink` | `-W` | `0` | Restricts TCP socket buffer window size to force micro-segmentation (0 = disabled). |
 | `--http-space` | `-e` | `true` | Enables HTTP CONNECT space insertion desynchronization. |
 | `--mix-header-case` | `-m` | `true` | Enables HTTP header key case mixing desynchronization. |
 | `--strip-alt-svc` | `-s` | `true` | Strips `Alt-Svc` headers to enforce TCP TLS 1.3 over censored QUIC UDP. |
 | `--port-rotate` | `-R` | `true` | Enables TCP source port rotation on connection retries to evade 4-tuple bans. |
 | `--trailing-dot` | `-t` | `true` | Appends root FQDN trailing dot (`example.com.`) to break exact domain filters. |
 | `--filter-type65` | `-T` | `true` | Filters malicious DNS `HTTPS` (type 65) records injected by ISP DNS poisoning. |
-| `--post-quantum` | `-Q` | `true` | Enables Post-Quantum TLS 1.3 ML-KEM-768 extension support. |
 | `--fallback-target` | - | `127.0.0.1:80` | Serves realistic Nginx 404 HTML server banner on ISP scanner active probes. |
+| `--fake-ttl` | `-F` | `0` | Injects fake ClientHello with low socket TTL to mislead DPI middleboxes (0 = disabled). |
+| `--fake-sni` | - | `disabled` | Benign domain name used for fake ClientHello injection (e.g. `google.com`). |
+| `--window-shrink` | `-W` | `0` | Restricts TCP socket buffer window size to force micro-segmentation (0 = disabled). |
 | `--dns-addr` | `-d` | `127.0.0.1:53` | DNS resolver server IP:port (`127.0.0.1:53` for local loopback / dnscrypt-proxy / dnsmasq). |
 | `--verbose` | `-v` | `false` | Enables verbose debug log output. |
 | `--help` | `-h` | - | Prints help and parameter information. |
@@ -90,12 +83,6 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
   # Scenario: Enable Fake Packet TTL Injection with fake google.com SNI and TTL=5
   ./greentunnelRS --port 8080 --fake-ttl 5 --fake-sni google.com --verbose
   ```
-
-- **`-P, --tls-padding` (TLS ClientHello Padding)**:  
-  Adds proportional TLS ClientHello padding using RFC 7685 Connection Padding. This prevents DPI systems (such as TSPU in Russia, Iran DPI, etc.) from identifying and blocking proxy connections using ClientHello packet size fingerprinting.
-
-- **`-D, --disorder` (TCP Disorder Mode)**:  
-  Transmits TLS Record 2 (containing trailing handshake data) *before* TLS Record 1 (containing the SNI split). Confuses stateful DPI reassembly engines while the target server's OS TCP stack correctly re-assembles the stream.
 
 - **`-W, --window-shrink <BYTES>` (TCP Window Shrinking)**:  
   Restricts socket buffer window size to force OS-level TCP micro-segmentation.
@@ -127,9 +114,6 @@ cargo build --release
 # Run with Fake Packet TTL Injection enabled (fake SNI google.com, TTL 5)
 ./target/release/greentunnelRS --port 8080 --fake-ttl 5 --fake-sni google.com
 
-# Run with TLS ClientHello Padding and Fake TTL enabled
-./target/release/greentunnelRS --port 8080 --tls-padding --fake-ttl 5 --fake-sni google.com --verbose
-
 # Run on OpenWrt / Router (listen on all network interfaces with local dnscrypt-proxy)
 ./target/release/greentunnelRS --bind 0.0.0.0 --port 8080 --dns-addr "127.0.0.1:55"
 ```
@@ -149,8 +133,8 @@ wget https://github.com/alikemalocalan/greentunnelRS/releases/latest/download/gr
 # 2. Make it executable
 chmod +x greentunnelRS-openwrt-aarch64
 
-# 3. Run the proxy server (listening on 0.0.0.0 for LAN clients with Aggressive Mode)
-./greentunnelRS-openwrt-aarch64 --bind 0.0.0.0 --port 8080 --aggressive
+# 3. Run the proxy server (listening on 0.0.0.0 for LAN clients)
+./greentunnelRS-openwrt-aarch64 --bind 0.0.0.0 --port 8080
 ```
 
 ---

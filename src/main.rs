@@ -31,9 +31,7 @@ fn main() -> anyhow::Result<()> {
 
     let config = ProxyServerConfig {
         bind_addr,
-        tls_padding: cli.tls_padding,
         dns_addr: cli.dns_addr,
-        disorder_mode: cli.disorder,
         fake_ttl: cli.fake_ttl,
         fake_sni: cli.fake_sni,
         window_shrink: cli.window_shrink,
@@ -43,7 +41,6 @@ fn main() -> anyhow::Result<()> {
         port_rotate: cli.port_rotate,
         trailing_dot: cli.trailing_dot,
         filter_type65: cli.filter_type65,
-        post_quantum: cli.post_quantum,
         fallback_target: cli.fallback_target,
     };
 
