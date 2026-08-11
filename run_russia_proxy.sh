@@ -17,60 +17,7 @@ PROXY_PORT="${PROXY_PORT:-8080}"
 IMAGE_NAME="greentunnel-russia-proxy"
 
 # ---- Select fastest TCP OVPN server by advertised speed ---------------
-if [ -z "$OVPN_URL" ] && [ -z "$1" ]; then
-    echo "==> Fetching Russian OpenVPN server list from vpnobratno.info..."
-    HTML_LIST=$(curl -s --connect-timeout 8 https://vpnobratno.info/russia_server_list_en.html || echo "")
-
-    if [ -z "$HTML_LIST" ]; then
-        echo "Error: Could not fetch server list from vpnobratno.info."
-        exit 1
-    fi
-
-    # Parse (speed, tcp_url) pairs: for each TCP URL find the closest Speed Mb/s
-    # value that appears before it in the HTML, then sort by speed descending.
-    TMPPY=$(mktemp /tmp/parse_vpn.XXXXXX.py)
-    cat > "$TMPPY" << 'PYEOF'
-import re, sys
-html = sys.stdin.read()
-tcp_links  = [(m.start(), m.group(1)) for m in re.finditer(r'href="([^"]*ddns_tcp\.ovpn)"', html)]
-speed_hits = [(m.start(), int(m.group(1))) for m in re.finditer(r'Speed (\d+) Mb/s', html)]
-pairs = []
-for link_pos, url in tcp_links:
-    before = [(pos, spd) for pos, spd in speed_hits if pos < link_pos]
-    speed  = before[-1][1] if before else 0
-    pairs.append((speed, url))
-pairs.sort(reverse=True)
-for speed, url in pairs:
-    print(url)
-PYEOF
-    SORTED_URLS=$(echo "$HTML_LIST" | python3 "$TMPPY")
-    rm -f "$TMPPY"
-
-    if [ -z "$SORTED_URLS" ]; then
-        echo "Error: No TCP OpenVPN servers found on vpnobratno.info."
-        exit 1
-    fi
-
-    echo "==> Probing fastest TCP servers (speed-sorted)..."
-    OVPN_URL=""
-    while IFS= read -r url; do
-        [ -z "$url" ] && continue
-        if curl -sf --head --connect-timeout 4 "$url" -o /dev/null 2>/dev/null; then
-            OVPN_URL="$url"
-            echo "    ✓ Selected: $url"
-            break
-        else
-            echo "    ✗ Unreachable: $url"
-        fi
-    done <<< "$SORTED_URLS"
-
-    if [ -z "$OVPN_URL" ]; then
-        echo "Error: No reachable TCP server found. Try again later or pass a URL manually."
-        exit 1
-    fi
-else
-    OVPN_URL="${1:-$OVPN_URL}"
-fi
+OVPN_URL="$("$SCRIPT_DIR/scripts/fetch_fastest_ovpn.sh" "${1:-$OVPN_URL}")"
 
 echo "==> Using OpenVPN URL: $OVPN_URL"
 
