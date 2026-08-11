@@ -9,8 +9,24 @@ permissions:
 
 jobs:
   build-release:
-    name: Build OpenWrt 64-bit ARM Binary
+    name: Build ${{ matrix.asset_name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-musl
+            gcc_pkg: gcc-aarch64-linux-gnu
+            asset_name: greentunnelRS-openwrt-aarch64
+          - target: mipsel-unknown-linux-musl
+            gcc_pkg: gcc-mipsel-linux-gnu
+            asset_name: greentunnelRS-openwrt-gl-mt300n-v2-mipsel
+          - target: mips-unknown-linux-musl
+            gcc_pkg: gcc-mips-linux-gnu
+            asset_name: greentunnelRS-openwrt-mips
+          - target: x86_64-unknown-linux-musl
+            gcc_pkg: musl-tools
+            asset_name: greentunnelRS-openwrt-x86_64
 
     steps:
       - name: Checkout repository
@@ -19,29 +35,31 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-unknown-linux-musl
+          targets: ${{ matrix.target }}
 
       - name: Install cross-compilation dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools
+          sudo apt-get install -y ${{ matrix.gcc_pkg }} musl-tools
 
-      - name: Build binary for OpenWrt (aarch64-unknown-linux-musl)
+      - name: Build binary for ${{ matrix.target }}
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_MIPSEL_UNKNOWN_LINUX_MUSL_LINKER: mipsel-linux-gnu-gcc
+          CARGO_TARGET_MIPS_UNKNOWN_LINUX_MUSL_LINKER: mips-linux-gnu-gcc
         run: |
-          cargo build --release --target aarch64-unknown-linux-musl
+          cargo build --release --target ${{ matrix.target }}
 
       - name: Prepare release asset
         run: |
-          cp target/aarch64-unknown-linux-musl/release/greentunnelRS greentunnelRS-openwrt-aarch64
-          tar -czvf greentunnelRS-openwrt-aarch64.tar.gz greentunnelRS-openwrt-aarch64
+          cp target/${{ matrix.target }}/release/greentunnelRS ${{ matrix.asset_name }}
+          tar -czvf ${{ matrix.asset_name }}.tar.gz ${{ matrix.asset_name }}
 
       - name: Upload Binary to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            greentunnelRS-openwrt-aarch64
-            greentunnelRS-openwrt-aarch64.tar.gz
+            ${{ matrix.asset_name }}
+            ${{ matrix.asset_name }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

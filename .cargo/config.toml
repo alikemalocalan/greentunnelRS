@@ -6,3 +6,8 @@ rustflags = ["-C", "link-arg=-Wl,--gc-sections"]
 
 [target.'cfg(target_os = "macos")']
 rustflags = ["-C", "link-arg=-Wl,-dead_strip"]
+
+[target.mipsel-unknown-linux-musl]
+linker = "mipsel-linux-gnu-gcc"
+rustflags = ["-C", "link-arg=-Wl,--gc-sections"]
+

@@ -16,7 +16,7 @@ name = "greentunnelRS"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "io-util", "time", "macros"] }
+tokio = { version = "1.53.1", features = ["rt", "net", "io-util", "time"] }
 tracing = { version = "0.1.44", features = ["std"], default-features = false }
 fastrand = "2.3.0"
 anyhow = "1.0.104"

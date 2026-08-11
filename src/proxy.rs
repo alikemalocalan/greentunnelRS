@@ -1,3 +1,4 @@
+use std::io::IoSlice;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -6,7 +7,7 @@ use tokio::net::{TcpListener, TcpStream};
 use crate::dns::DnsResolver;
 use crate::tls::{
     find_sni_info, fragment_at_offset, has_post_quantum_extension, is_client_hello,
-    pad_client_hello, DEFAULT_TARGET_SIZE, TLS_RECORD_HEADER_SIZE,
+    pad_client_hello, TlsRecordSlice, DEFAULT_TARGET_SIZE, TLS_RECORD_HEADER_SIZE,
 };
 use crate::utils::{
     is_http_connect, is_padding_incompatible_domain, parse_connect_target, preprocess_http_request,
@@ -32,15 +33,18 @@ pub struct ProxyServerConfig {
     pub fallback_target: String,
 }
 
-pub async fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
-    let num_workers = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(2);
-    let resolver = Arc::new(DnsResolver::new(&config.dns_addr));
+pub fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
+    let num_workers = if cfg!(windows) {
+        1
+    } else {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(2)
+    };
     let config = Arc::new(config);
 
     tracing::info!(
-        "GreenTunnel Rust Proxy running on http://{} with {} CPU worker threads (TLSPadding: {}, Disorder: {}, FakeTTL: {}, WindowShrink: {}, HttpSpace: {}, MixHeaderCase: {}, StripAltSvc: {}, PortRotate: {}, JA4Permute: {}, TrailingDot: {}, FilterType65: {}, PostQuantum: {}, FallbackTarget: {})",
+        "GreenTunnel Rust Proxy running on http://{} with {} Thread-per-Core workers (SO_REUSEPORT, current_thread) (TLSPadding: {}, Disorder: {}, FakeTTL: {}, WindowShrink: {}, HttpSpace: {}, MixHeaderCase: {}, StripAltSvc: {}, PortRotate: {}, JA4Permute: {}, TrailingDot: {}, FilterType65: {}, PostQuantum: {}, FallbackTarget: {})",
         config.bind_addr,
         num_workers,
         config.tls_padding,
@@ -61,19 +65,30 @@ pub async fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
     let mut handles = Vec::with_capacity(num_workers);
 
     for worker_id in 0..num_workers {
-        let resolver = Arc::clone(&resolver);
         let config = Arc::clone(&config);
 
-        let handle = tokio::spawn(async move {
-            if let Err(e) = run_worker_listener(worker_id, resolver, config).await {
-                tracing::error!("Worker {} listener error: {}", worker_id, e);
-            }
-        });
+        let handle = std::thread::Builder::new()
+            .name(format!("worker-{}", worker_id))
+            .spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("Failed to build single-threaded Tokio runtime");
+
+                let resolver = Arc::new(DnsResolver::new(&config.dns_addr));
+
+                rt.block_on(async move {
+                    if let Err(e) = run_worker_listener(worker_id, resolver, config).await {
+                        tracing::error!("Worker {} listener error: {}", worker_id, e);
+                    }
+                });
+            })?;
+
         handles.push(handle);
     }
 
     for handle in handles {
-        let _ = handle.await;
+        let _ = handle.join();
     }
 
     Ok(())
@@ -156,13 +171,29 @@ async fn handle_client(
             }
         };
 
+        let clean_raw = raw_host.trim_end_matches('.');
+        if clean_raw.eq_ignore_ascii_case("localhost")
+            || clean_raw
+                .parse::<std::net::IpAddr>()
+                .map(|ip| ip.is_loopback() || ip.is_unspecified())
+                .unwrap_or(false)
+        {
+            tracing::debug!(
+                "Rejecting CONNECT connection for {}:{} -> loopback/unspecified host detected",
+                raw_host,
+                port
+            );
+            client
+                .write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n")
+                .await?;
+            return Ok(());
+        }
+
         let host = if config.trailing_dot {
             crate::utils::ensure_trailing_dot(&raw_host)
         } else {
             raw_host
         };
-
-        tracing::info!("CONNECT request: {}:{}", host, port);
 
         // Resolve domain via DoH or standard IP parse
         let remote_ip = match resolver.resolve(&host).await {
@@ -188,6 +219,21 @@ async fn handle_client(
                 }
             }
         };
+
+        if remote_ip.is_loopback() || remote_ip.is_unspecified() {
+            tracing::debug!(
+                "Rejecting CONNECT connection for {}:{} -> resolved to loopback/unspecified IP: {}",
+                host,
+                port,
+                remote_ip
+            );
+            client
+                .write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n")
+                .await?;
+            return Ok(());
+        }
+
+        tracing::info!("CONNECT request: {}:{}", host, port);
 
         let remote_addr = SocketAddr::new(remote_ip, port);
 
@@ -299,12 +345,13 @@ async fn handle_client(
                     let split_point = sni_info.hostname_offset + cut_in_sni;
 
                     if split_point > TLS_RECORD_HEADER_SIZE && split_point < bytes.len() {
-                        let tls_records = fragment_at_offset(&bytes, split_point);
+                        let (rec1, rec2) = fragment_at_offset(&bytes, split_point);
                         let is_meta = is_padding_incompatible_domain(&host);
 
                         transmit_tls_records(
                             &mut remote,
-                            &tls_records,
+                            &rec1,
+                            rec2.as_ref(),
                             trailing_data,
                             is_meta,
                             config.disorder_mode,
@@ -316,7 +363,7 @@ async fn handle_client(
                             host,
                             split_point,
                             if is_meta { "0ms (Meta)" } else { "1-5ms" },
-                            tls_records.len()
+                            if rec2.is_some() { 2 } else { 1 }
                         );
 
                         tunnel_bidirectional(&mut client, &mut remote).await?;
@@ -375,7 +422,11 @@ fn extract_first_tls_record(raw_bytes: &[u8]) -> (&[u8], &[u8]) {
 
 fn calculate_sni_cut_offset(hostname_length: usize, host: &str) -> usize {
     if hostname_length > 6 {
-        let start_offset = if host.to_lowercase().starts_with("www.") { 4 } else { 0 };
+        let start_offset = if host.to_lowercase().starts_with("www.") {
+            4
+        } else {
+            0
+        };
         let domain_len = hostname_length.saturating_sub(start_offset);
         let mid = start_offset + (domain_len / 2);
         let min_cut = (mid.saturating_sub(1)).max(start_offset + 2);
@@ -399,15 +450,72 @@ async fn inject_fake_ttl_probe(peer_addr: SocketAddr, fake_sni: &str, fake_ttl: 
     }
 }
 
+/// Helper to send multiple slice buffers using zero-allocation vectored I/O (`writev` syscall).
+pub async fn write_all_vectored<S>(stream: &mut S, slices: &[&[u8]]) -> std::io::Result<()>
+where
+    S: AsyncWriteExt + Unpin,
+{
+    let mut current_slices = slices;
+    let mut first_slice_offset = 0;
+
+    while !current_slices.is_empty() {
+        while !current_slices.is_empty() && first_slice_offset >= current_slices[0].len() {
+            current_slices = &current_slices[1..];
+            first_slice_offset = 0;
+        }
+
+        if current_slices.is_empty() {
+            break;
+        }
+
+        let first = &current_slices[0][first_slice_offset..];
+        let mut io_slices_buf = [
+            IoSlice::new(&[]),
+            IoSlice::new(&[]),
+            IoSlice::new(&[]),
+            IoSlice::new(&[]),
+        ];
+        let count = current_slices.len().min(4);
+        io_slices_buf[0] = IoSlice::new(first);
+        for i in 1..count {
+            io_slices_buf[i] = IoSlice::new(current_slices[i]);
+        }
+
+        let n = stream.write_vectored(&io_slices_buf[..count]).await?;
+        if n == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                "failed to write buffer with write_vectored",
+            ));
+        }
+
+        let mut remaining = n;
+        while remaining > 0 && !current_slices.is_empty() {
+            let active_len = current_slices[0].len() - first_slice_offset;
+            if remaining >= active_len {
+                remaining -= active_len;
+                current_slices = &current_slices[1..];
+                first_slice_offset = 0;
+            } else {
+                first_slice_offset += remaining;
+                remaining = 0;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 async fn transmit_tls_records(
     remote: &mut TcpStream,
-    tls_records: &[Vec<u8>],
+    rec1: &TlsRecordSlice<'_>,
+    rec2: Option<&TlsRecordSlice<'_>>,
     trailing_data: &[u8],
     is_meta: bool,
     _disorder_mode: bool,
 ) -> anyhow::Result<()> {
-    // Record 1 (containing first half of SNI) must be transmitted first
-    remote.write_all(&tls_records[0]).await?;
+    // Record 1 (containing first half of SNI) must be transmitted first using vectored I/O
+    write_all_vectored(remote, &[&rec1.header[..], rec1.payload]).await?;
     remote.flush().await?;
 
     // Fast inter-fragment delay (1-5ms) to trigger DPI reassembly timeout unless Meta domain
@@ -415,17 +523,18 @@ async fn transmit_tls_records(
         random_delay(1, 5).await;
     }
 
-    // Record 2 (containing second half of SNI and trailing extensions) transmitted second
-    for rec in &tls_records[1..] {
-        remote.write_all(rec).await?;
-    }
-    remote.flush().await?;
-
-    // Send any trailing unfragmented bytes read from client buffer
-    if !trailing_data.is_empty() {
+    // Record 2 (containing second half of SNI) and trailing data transmitted in ONE vectored writev syscall
+    if let Some(rec2) = rec2 {
+        if !trailing_data.is_empty() {
+            write_all_vectored(remote, &[&rec2.header[..], rec2.payload, trailing_data]).await?;
+        } else {
+            write_all_vectored(remote, &[&rec2.header[..], rec2.payload]).await?;
+        }
+    } else if !trailing_data.is_empty() {
         remote.write_all(trailing_data).await?;
-        remote.flush().await?;
     }
+
+    remote.flush().await?;
 
     Ok(())
 }

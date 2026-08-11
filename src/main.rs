@@ -8,8 +8,7 @@ use args::{Cli, Parser};
 use proxy::{run_server, ProxyServerConfig};
 use std::net::SocketAddr;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     let subscriber = SimpleLogSubscriber {
@@ -49,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
         fallback_target: cli.fallback_target,
     };
 
-    run_server(config).await?;
+    run_server(config)?;
 
     Ok(())
 }
