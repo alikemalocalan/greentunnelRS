@@ -184,18 +184,17 @@ pub fn build_synthetic_client_hello(hostname: Option<&str>, include_padding: boo
     hs_body.extend_from_slice(&extensions_data);
 
     let hs_len = (4 + hs_body.len()) as u16;
-    let mut record = Vec::new();
-    record.push(0x16);
-    record.push(0x03);
-    record.push(0x01);
-    record.push(((hs_len >> 8) & 0xFF) as u8);
-    record.push((hs_len & 0xFF) as u8);
-
-    record.push(0x01); // ClientHello
-    record.push(0x00);
     let body_len = hs_body.len() as u16;
-    record.push(((body_len >> 8) & 0xFF) as u8);
-    record.push((body_len & 0xFF) as u8);
+    let mut record = vec![
+        0x16, // TLS record: Handshake
+        0x03, 0x01, // TLS version 3.1
+        ((hs_len >> 8) & 0xFF) as u8,
+        (hs_len & 0xFF) as u8,
+        0x01, // ClientHello
+        0x00, // Handshake length high byte
+        ((body_len >> 8) & 0xFF) as u8,
+        (body_len & 0xFF) as u8,
+    ];
     record.extend_from_slice(&hs_body);
 
     record

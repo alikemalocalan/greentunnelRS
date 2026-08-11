@@ -94,9 +94,8 @@ The censorship system operates directly at the ISP level using centralized **TSP
     - **How it works:** Validates incoming proxy requests and drops non-proxy probe packets from ISP scanner bots.
     - **DPI Impact:** Prevents ISP middleboxes from actively probing and fingerprinting the proxy server.
 
-13. **TLS Extension Permutation (Dynamic JA4 Randomization)**
-    - **How it works:** Randomizes the ordering of TLS extensions (`supported_groups`, `key_share`, `ALPN`, `padding`) in `ClientHello` payloads.
-    - **DPI Impact:** Prevents DPI systems from creating static client fingerprints (`-J` / `--ja4-permute`).
+13. **TLS Extension Permutation (Dynamic JA4 Randomization)** ❌ *Removed*
+    - **Why removed:** A transparent (non-MITM) proxy cannot modify `ClientHello` content without breaking the TLS 1.3 transcript hash. Both client and server maintain a running hash of all handshake messages; any byte-level change (including extension reordering) causes a MAC mismatch (`SSL_ERROR_BAD_MAC_READ`). Tools like ByeDPI/Zapret use the same architectural approach and do not attempt JA4 modification — they rely on TCP-level fragmentation to prevent DPI from reading the `ClientHello` at all.
 
 14. **Statistical Traffic Masking (Background Noise Obfuscation) *(Roadmap)*** [sivpn]
     - **How it works:** Transmits low-overhead (11 Kbps) dummy background probe packets to multiple benign global CDN IP addresses outside the tunnel.
@@ -142,9 +141,8 @@ The censorship system operates directly at the ISP level using centralized **TSP
 | **TCP Source Port Rotation** | Rotates client TCP port on socket connection to evade 4-tuple blackhole bans. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Zero |
 | **QUIC Alt-Svc Stripping** | Strips `Alt-Svc` headers to enforce TCP TLS 1.3 over censored QUIC UDP. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Zero |
 | **Post-Quantum TLS 1.3 (ML-KEM)** | Supports hybrid ML-KEM-768 Kyber KeyShare extensions to defeat quantum & PQC-aware DPI. | ✅ Implemented | 🔥 **Critical (High)** | ⚡ Zero |
-| **Dynamic JA4 Randomization** | Randomizes TLS ClientHello extension ordering to frustrate JA3/JA4 fingerprinting. | ✅ Implemented | 🔶 **High** | ⚡ Zero |
+| **Dynamic JA4 Randomization** | Randomized TLS ClientHello extension ordering. | ❌ Removed (TLS 1.3 incompatible) | 🔶 **N/A** | ⚡ N/A |
 | **Active Probing Fallback Target** | Serves realistic Nginx 404 HTML server banner on ISP scanner active probes. | ✅ Implemented | 🔶 **High** | ⚡ Zero |
-| **TLS Extension Permutation** | Randomizes TLS ClientHello extension ordering to prevent static client fingerprinting. | ✅ Implemented | 🔶 **High** | ⚡ Zero |
 | **DNS Type 65 Filtering** | Filters malicious DNS `HTTPS` (type 65) records injected by ISP DNS poisoning. | ✅ Implemented | 🔶 **High** | ⚡ Zero |
 | **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | ✅ Implemented | 🟡 **Medium** | ⚡ Zero |
 | **HTTP CONNECT Space Insertion** | Inserts extra spaces in CONNECT requests to confuse DPI regex splitters. | ✅ Implemented | 🟡 **Medium** | ⚡ Zero |

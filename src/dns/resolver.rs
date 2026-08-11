@@ -129,9 +129,7 @@ pub fn parse_dns_response(data: &[u8]) -> Option<IpAddr> {
 
     // Skip Question section
     for _ in 0..qdcount {
-        let Some(next_pos) = skip_dns_name(data, pos) else {
-            return None;
-        };
+        let next_pos = skip_dns_name(data, pos)?;
         pos = next_pos + 4; // Skip QTYPE + QCLASS
     }
 

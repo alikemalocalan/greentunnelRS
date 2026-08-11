@@ -33,9 +33,7 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 | **TCP Window Size Shrinking** | Sets TCP socket buffer window size to force micro-segmentation. | ✅ Implemented | ✅ Available (`-w`) | 🟡 **Medium** | ⏱️ Minor handshake delay |
 | **TCP Source Port Rotation** | Rotates client TCP port on socket connection to evade 4-tuple blackhole bans. | ✅ Implemented | ✅ Enabled by default (`-R`) | 🔥 **Critical (High)** | ⚡ Zero |
 | **Post-Quantum TLS 1.3 (ML-KEM)** | Supports hybrid ML-KEM-768 Kyber KeyShare extensions to defeat quantum & PQC-aware DPI. | ✅ Implemented | ✅ Enabled by default (`-Q`) | 🔥 **Critical (High)** | ⚡ Zero |
-| **Dynamic JA4 Randomization** | Randomizes TLS ClientHello extension ordering to frustrate JA3/JA4 fingerprinting. | ✅ Implemented | ✅ Enabled by default (`-J`) | 🔶 **High** | ⚡ Zero |
 | **Active Probing Fallback Target** | Serves realistic Nginx 404 HTML server banner on ISP scanner active probes. | ✅ Implemented | ✅ Available (`--fallback-target`) | 🔶 **High** | ⚡ Zero |
-| **TLS Extension Permutation** | Randomizes TLS extension ordering to prevent static client fingerprinting. | ✅ Implemented | ✅ Enabled by default (`-J`) | 🔶 **High** | ⚡ Zero |
 | **DNS Type 65 Filtering** | Filters malicious DNS `HTTPS` (type 65) records injected by ISP DNS poisoning. | ✅ Implemented | ✅ Enabled by default (`-T`) | 🔶 **High** | ⚡ Zero |
 | **HTTP Header Case Mixing** | Randomizes case in HTTP headers (e.g. `hOsT:`) to break string matching. | ✅ Implemented | ✅ Enabled by default (`-m`) | 🟡 **Medium** | ⚡ Zero |
 | **HTTP CONNECT Space Insertion** | Inserts extra spaces in CONNECT requests to confuse DPI regex splitters. | ✅ Implemented | ✅ Enabled by default (`-e`) | 🟡 **Medium** | ⚡ Zero |
@@ -75,7 +73,6 @@ Engineered for embedded OpenWrt routers (e.g. GL.iNet Beryl AX), Linux servers, 
 | `--mix-header-case` | `-m` | `true` | Enables HTTP header key case mixing desynchronization. |
 | `--strip-alt-svc` | `-s` | `true` | Strips `Alt-Svc` headers to enforce TCP TLS 1.3 over censored QUIC UDP. |
 | `--port-rotate` | `-R` | `true` | Enables TCP source port rotation on connection retries to evade 4-tuple bans. |
-| `--ja4-permute` | `-J` | `false` | Enables dynamic TLS ClientHello extension permutation (JA4 randomization). |
 | `--trailing-dot` | `-t` | `true` | Appends root FQDN trailing dot (`example.com.`) to break exact domain filters. |
 | `--filter-type65` | `-T` | `true` | Filters malicious DNS `HTTPS` (type 65) records injected by ISP DNS poisoning. |
 | `--post-quantum` | `-Q` | `true` | Enables Post-Quantum TLS 1.3 ML-KEM-768 extension support. |

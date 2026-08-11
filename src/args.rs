@@ -17,7 +17,6 @@ pub struct Cli {
     pub mix_header_case: bool,
     pub strip_alt_svc: bool,
     pub port_rotate: bool,
-    pub ja4_permute: bool,
     pub trailing_dot: bool,
     pub filter_type65: bool,
     pub post_quantum: bool,
@@ -28,7 +27,7 @@ impl Parser for Cli {
     fn parse() -> Self {
         let mut port = 8080;
         let mut bind = "127.0.0.1".to_string();
-        let mut tls_padding = true;
+        let mut tls_padding = false;
         let mut dns_addr = "127.0.0.1:53".to_string();
         let mut verbose = false;
         let mut disorder = true;
@@ -39,10 +38,9 @@ impl Parser for Cli {
         let mut mix_header_case = true;
         let mut strip_alt_svc = true;
         let mut port_rotate = true;
-        let mut ja4_permute = false;
         let mut trailing_dot = true;
         let mut filter_type65 = true;
-        let mut post_quantum = true;
+        let mut post_quantum = false;
         let mut fallback_target = "127.0.0.1:80".to_string();
 
         let args: Vec<String> = std::env::args().collect();
@@ -76,7 +74,6 @@ impl Parser for Cli {
                 "-m" | "--mix-header-case" => mix_header_case = true,
                 "-s" | "--strip-alt-svc" => strip_alt_svc = true,
                 "-R" | "--port-rotate" => port_rotate = true,
-                "-J" | "--ja4-permute" => ja4_permute = true,
                 "-t" | "--trailing-dot" => trailing_dot = true,
                 "-T" | "--filter-type65" => filter_type65 = true,
                 "-Q" | "--post-quantum" => post_quantum = true,
@@ -135,7 +132,6 @@ impl Parser for Cli {
             mix_header_case,
             strip_alt_svc,
             port_rotate,
-            ja4_permute,
             trailing_dot,
             filter_type65,
             post_quantum,
@@ -159,7 +155,6 @@ Options:
   -m, --mix-header-case         Enable HTTP header key case mixing desynchronization
   -s, --strip-alt-svc           Strip Alt-Svc headers to enforce TCP TLS 1.3 over censored QUIC UDP [default: true]
   -R, --port-rotate             Enable TCP source port rotation on connection retries [default: true]
-  -J, --ja4-permute             Enable dynamic TLS ClientHello extension permutation [default: true]
   -t, --trailing-dot            Append root FQDN trailing dot (example.com.) to break DPI regex filters
   -T, --filter-type65           Filter out poisoned DNS Type 65 (HTTPS/SVCB) records [default: true]
   -Q, --post-quantum            Enable Post-Quantum TLS 1.3 ML-KEM-768 extension support
@@ -193,7 +188,7 @@ mod tests {
         let cli = Cli {
             port: 8080,
             bind: "127.0.0.1".to_string(),
-            tls_padding: true,
+            tls_padding: false,
             dns_addr: "127.0.0.1:53".to_string(),
             verbose: false,
             disorder: true,
@@ -204,27 +199,25 @@ mod tests {
             mix_header_case: true,
             strip_alt_svc: true,
             port_rotate: true,
-            ja4_permute: false,
             trailing_dot: true,
             filter_type65: true,
-            post_quantum: true,
+            post_quantum: false,
             fallback_target: "127.0.0.1:80".to_string(),
         };
         assert_eq!(cli.port, 8080);
         assert_eq!(cli.bind, "127.0.0.1");
         assert_eq!(cli.dns_addr, "127.0.0.1:53");
         assert_eq!(cli.fake_sni, "");
-        assert!(cli.tls_padding);
+        assert!(!cli.tls_padding);
         assert_eq!(cli.fake_ttl, 0);
         assert_eq!(cli.window_shrink, 0);
         assert!(cli.http_space);
         assert!(cli.mix_header_case);
         assert!(cli.strip_alt_svc);
         assert!(cli.port_rotate);
-        assert!(!cli.ja4_permute);
         assert!(cli.trailing_dot);
         assert!(cli.filter_type65);
-        assert!(cli.post_quantum);
+        assert!(!cli.post_quantum);
         assert_eq!(cli.fallback_target, "127.0.0.1:80");
     }
 }

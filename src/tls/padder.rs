@@ -1,7 +1,6 @@
 use super::parser::{find_extensions_length_offset, is_client_hello, read_u16, TLS_RECORD_HEADER_SIZE};
 
 pub const PADDING_EXTENSION_TYPE: u16 = 0x0015;
-pub const PRE_SHARED_KEY_EXTENSION_TYPE: u16 = 0x0029;
 pub const SUPPORTED_GROUPS_EXTENSION_TYPE: u16 = 0x000a;
 pub const KEY_SHARE_EXTENSION_TYPE: u16 = 0x0033;
 pub const DEFAULT_TARGET_SIZE: usize = 512;
@@ -43,13 +42,12 @@ pub fn has_post_quantum_extension(data: &[u8]) -> bool {
 
         let ext_payload = &data[pos + 4..ext_end];
 
-        if ext_type == SUPPORTED_GROUPS_EXTENSION_TYPE || ext_type == KEY_SHARE_EXTENSION_TYPE {
-            if ext_payload
+        if (ext_type == SUPPORTED_GROUPS_EXTENSION_TYPE || ext_type == KEY_SHARE_EXTENSION_TYPE)
+            && ext_payload
                 .chunks_exact(2)
                 .any(|c| u16::from_be_bytes([c[0], c[1]]) == POST_QUANTUM_GROUP_X25519_MLKEM768)
-            {
-                return true;
-            }
+        {
+            return true;
         }
 
         pos = ext_end;
@@ -198,90 +196,6 @@ fn has_padding_extension(data: &[u8]) -> bool {
     false
 }
 
-/// Randomly permutes (shuffles) non-positional TLS ClientHello extensions to frustrate JA3/JA4 fingerprinting.
-/// Positional extensions like `pre_shared_key` (0x0029) and `padding` (0x0015) are strictly kept at the end per RFC 8446.
-pub fn permute_tls_extensions(data: &[u8]) -> Vec<u8> {
-    if !is_client_hello(data) {
-        return data.to_vec();
-    }
-
-    let ext_len_offset = match find_extensions_length_offset(data) {
-        Some(offset) => offset,
-        None => return data.to_vec(),
-    };
-
-    let ext_len = match read_u16(data, ext_len_offset) {
-        Some(len) => len as usize,
-        None => return data.to_vec(),
-    };
-
-    let mut pos = ext_len_offset + 2;
-    let end = pos + ext_len;
-    if end > data.len() {
-        return data.to_vec();
-    }
-
-    let mut normal_extensions: Vec<&[u8]> = Vec::new();
-    let mut trailing_extensions: Vec<&[u8]> = Vec::new();
-
-    while pos + 4 <= end {
-        let ext_type = match read_u16(data, pos) {
-            Some(t) => t,
-            None => break,
-        };
-        let ext_data_len = match read_u16(data, pos + 2) {
-            Some(l) => l as usize,
-            None => break,
-        };
-        let ext_total_len = 4 + ext_data_len;
-        if pos + ext_total_len > end {
-            break;
-        }
-
-        let ext_slice = &data[pos..pos + ext_total_len];
-
-        // RFC 8446 Sec 4.2.11: pre_shared_key (0x0029) MUST be the last extension in ClientHello.
-        // RFC 7685: padding (0x0015) MUST be at the end.
-        if ext_type == PRE_SHARED_KEY_EXTENSION_TYPE || ext_type == PADDING_EXTENSION_TYPE {
-            trailing_extensions.push(ext_slice);
-        } else {
-            normal_extensions.push(ext_slice);
-        }
-
-        pos += ext_total_len;
-    }
-
-    // Abort permutation if parsing did not cleanly reach the exact end of extensions block
-    if pos != end {
-        return data.to_vec();
-    }
-
-    if normal_extensions.len() < 2 {
-        return data.to_vec();
-    }
-
-    // Fisher-Yates shuffle ONLY non-positional normal extensions
-    for i in (1..normal_extensions.len()).rev() {
-        let j = fastrand::usize(0..=i);
-        normal_extensions.swap(i, j);
-    }
-
-    // Reconstruct ClientHello: header + normal shuffled extensions + RFC-mandated trailing extensions + rest of payload
-    let mut result = Vec::with_capacity(data.len());
-    result.extend_from_slice(&data[..ext_len_offset + 2]);
-    for ext in normal_extensions {
-        result.extend_from_slice(ext);
-    }
-    for ext in trailing_extensions {
-        result.extend_from_slice(ext);
-    }
-    if data.len() > end {
-        result.extend_from_slice(&data[end..]);
-    }
-
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,14 +234,6 @@ mod tests {
 
         let padded = pad_client_hello(&original, DEFAULT_TARGET_SIZE);
         assert!(padded.ends_with(trailing));
-    }
-
-    #[test]
-    fn test_permute_tls_extensions() {
-        let original = build_synthetic_client_hello(Some("example.com"), true);
-        let permuted = permute_tls_extensions(&original);
-        assert_eq!(original.len(), permuted.len());
-        assert!(is_client_hello(&permuted));
     }
 
     #[test]

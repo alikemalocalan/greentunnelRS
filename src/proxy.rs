@@ -26,7 +26,6 @@ pub struct ProxyServerConfig {
     pub mix_header_case: bool,
     pub strip_alt_svc: bool,
     pub port_rotate: bool,
-    pub ja4_permute: bool,
     pub trailing_dot: bool,
     pub filter_type65: bool,
     pub post_quantum: bool,
@@ -44,7 +43,7 @@ pub fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
     let config = Arc::new(config);
 
     tracing::info!(
-        "GreenTunnel Rust Proxy running on http://{} with {} Thread-per-Core workers (SO_REUSEPORT, current_thread) (TLSPadding: {}, Disorder: {}, FakeTTL: {}, WindowShrink: {}, HttpSpace: {}, MixHeaderCase: {}, StripAltSvc: {}, PortRotate: {}, JA4Permute: {}, TrailingDot: {}, FilterType65: {}, PostQuantum: {}, FallbackTarget: {})",
+        "GreenTunnel Rust Proxy running on http://{} with {} Thread-per-Core workers (SO_REUSEPORT, current_thread) (TLSPadding: {}, Disorder: {}, FakeTTL: {}, WindowShrink: {}, HttpSpace: {}, MixHeaderCase: {}, StripAltSvc: {}, PortRotate: {}, TrailingDot: {}, FilterType65: {}, PostQuantum: {}, FallbackTarget: {})",
         config.bind_addr,
         num_workers,
         config.tls_padding,
@@ -55,7 +54,6 @@ pub fn run_server(config: ProxyServerConfig) -> anyhow::Result<()> {
         config.mix_header_case,
         config.strip_alt_svc,
         config.port_rotate,
-        config.ja4_permute,
         config.trailing_dot,
         config.filter_type65,
         config.post_quantum,
@@ -318,7 +316,7 @@ async fn handle_client(
             let (raw_ch, trailing_data) = extract_first_tls_record(raw_bytes);
 
             // Step 1: TLS ClientHello Padding (RFC 7685)
-            let mut bytes = if config.tls_padding
+            let bytes = if config.tls_padding
                 && !is_padding_incompatible_domain(&host)
                 && is_client_hello(raw_ch)
             {
@@ -327,10 +325,6 @@ async fn handle_client(
                 raw_ch.to_vec()
             };
 
-            // Step 2: JA4 Extension Permutation
-            if config.ja4_permute && is_client_hello(&bytes) {
-                bytes = crate::tls::permute_tls_extensions(&bytes);
-            }
 
             if config.post_quantum && has_post_quantum_extension(raw_ch) {
                 tracing::info!(
