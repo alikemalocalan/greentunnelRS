@@ -10,7 +10,6 @@ use std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-
     let cli = Cli::parse();
 
     let subscriber = SimpleLogSubscriber {

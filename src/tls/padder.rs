@@ -262,7 +262,7 @@ pub fn permute_tls_extensions(data: &[u8]) -> Vec<u8> {
 
     // Fisher-Yates shuffle ONLY non-positional normal extensions
     for i in (1..normal_extensions.len()).rev() {
-        let j = rand::random_range(0..=i);
+        let j = fastrand::usize(0..=i);
         normal_extensions.swap(i, j);
     }
 

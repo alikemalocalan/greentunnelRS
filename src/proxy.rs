@@ -381,7 +381,7 @@ fn calculate_sni_cut_offset(hostname_length: usize, host: &str) -> usize {
         let min_cut = (mid.saturating_sub(1)).max(start_offset + 2);
         let max_cut = (mid + 1).min(hostname_length - 2);
         if min_cut <= max_cut {
-            rand::random_range(min_cut..=max_cut)
+            fastrand::usize(min_cut..=max_cut)
         } else {
             hostname_length / 2
         }

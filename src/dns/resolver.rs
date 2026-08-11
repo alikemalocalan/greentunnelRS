@@ -1,12 +1,8 @@
-use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::Arc;
 use tokio::net::UdpSocket;
-use tokio::sync::RwLock;
 
 pub struct DnsResolver {
     dns_addr: String,
-    cache: Arc<RwLock<HashMap<String, IpAddr>>>,
 }
 
 impl DnsResolver {
@@ -19,10 +15,7 @@ impl DnsResolver {
             dns_addr.to_string()
         };
 
-        Self {
-            dns_addr: addr,
-            cache: Arc::new(RwLock::new(HashMap::new())),
-        }
+        Self { dns_addr: addr }
     }
 
     /// Resolves a domain hostname to an IP address using fast zero-dependency local UDP DNS (127.0.0.1:53).
@@ -34,24 +27,11 @@ impl DnsResolver {
             return Some(ip);
         }
 
-        // Check memory cache
-        {
-            let cache_read = self.cache.read().await;
-            if let Some(ip) = cache_read.get(clean_domain) {
-                return Some(*ip);
-            }
-        }
-
         let query = build_dns_query(clean_domain);
 
         // Try direct UDP DNS query to local loopback (127.0.0.1:53 / dnscrypt-proxy / dnsmasq)
         if let Some(resp_buf) = self.query_udp(&query).await {
             if let Some(ip) = parse_dns_response(&resp_buf) {
-                let mut cache_write = self.cache.write().await;
-                if cache_write.len() > 500 {
-                    cache_write.clear();
-                }
-                cache_write.insert(clean_domain.to_string(), ip);
                 return Some(ip);
             }
         }
@@ -60,11 +40,6 @@ impl DnsResolver {
         if let Ok(mut addrs) = tokio::net::lookup_host(format!("{}:443", clean_domain)).await {
             if let Some(addr) = addrs.next() {
                 let ip = addr.ip();
-                let mut cache_write = self.cache.write().await;
-                if cache_write.len() > 500 {
-                    cache_write.clear();
-                }
-                cache_write.insert(clean_domain.to_string(), ip);
                 return Some(ip);
             }
         }
@@ -99,7 +74,7 @@ impl DnsResolver {
 /// Builds a 100% RFC 1035 compliant binary DNS query packet for Type A (IPv4) host lookup.
 pub fn build_dns_query(domain: &str) -> Vec<u8> {
     let mut query = Vec::with_capacity(64);
-    let tx_id = rand::random::<u16>();
+    let tx_id: u16 = 1;
     query.extend_from_slice(&tx_id.to_be_bytes());
 
     // Flags: 0x0100 (Standard query, recursion desired)

@@ -22,7 +22,7 @@ pub async fn split_and_write(data: &[u8], stream: &mut TcpStream) -> Result<(), 
 
     let mut offset = 0;
     while offset < data.len() {
-        let chunk_size = rand::random_range(80..=256).min(data.len() - offset);
+        let chunk_size = fastrand::usize(80..=256).min(data.len() - offset);
         let chunk = &data[offset..offset + chunk_size];
         stream.write_all(chunk).await?;
         offset += chunk_size;
@@ -33,7 +33,7 @@ pub async fn split_and_write(data: &[u8], stream: &mut TcpStream) -> Result<(), 
 
 /// Pauses execution for a random duration between `min_ms` and `max_ms`.
 pub async fn random_delay(min_ms: u64, max_ms: u64) {
-    let delay_ms = rand::random_range(min_ms..=max_ms);
+    let delay_ms = fastrand::u64(min_ms..=max_ms);
     tokio::time::sleep(Duration::from_millis(delay_ms)).await;
 }
 
@@ -145,7 +145,11 @@ pub fn apply_header_case_mixing(request_str: &str) -> String {
 }
 
 /// Preprocesses HTTP request string by stripping proxy headers, applying HTTP CONNECT space insertion, and header case mixing.
-pub fn preprocess_http_request(request_str: &str, http_space: bool, mix_header_case: bool) -> String {
+pub fn preprocess_http_request(
+    request_str: &str,
+    http_space: bool,
+    mix_header_case: bool,
+) -> String {
     let mut processed = strip_proxy_headers(request_str);
     if http_space {
         let first_line = processed.lines().next().unwrap_or("").to_string();
@@ -219,12 +223,18 @@ mod tests {
     fn test_space_insertion_and_case_mixing() {
         let req = "CONNECT instagram.com:443 HTTP/1.1\r\nHost: instagram.com:443\r\nUser-Agent: curl/7.68.0\r\n\r\n";
         assert!(is_http_connect(req));
-        assert_eq!(parse_connect_target(req), Some(("instagram.com".to_string(), 443)));
+        assert_eq!(
+            parse_connect_target(req),
+            Some(("instagram.com".to_string(), 443))
+        );
 
         let preprocessed = preprocess_http_request(req, true, true);
         assert!(preprocessed.contains("instagram.com:443"));
         assert!(is_http_connect(&preprocessed));
-        assert_eq!(parse_connect_target(&preprocessed), Some(("instagram.com".to_string(), 443)));
+        assert_eq!(
+            parse_connect_target(&preprocessed),
+            Some(("instagram.com".to_string(), 443))
+        );
         assert!(preprocessed.contains("   ")); // multi space check
         assert!(preprocessed.contains("hOsT:")); // mixed case check
     }
