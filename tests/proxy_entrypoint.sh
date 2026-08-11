@@ -65,6 +65,14 @@ echo ""
 if ip link show tun0 >/dev/null 2>&1 || grep -q "Initialization Sequence Completed" "$OPENVPN_LOG" 2>/dev/null; then
     echo -e "    ${GREEN}VPN connected!${RESET}"
 
+    # Add explicit routes for Docker host & local subnets via eth0 so proxy client responses reach Docker host (macOS Firefox)
+    ETH_GW=$(ip route show default dev eth0 2>/dev/null | awk '/default/ {print $3}')
+    if [ -n "$ETH_GW" ]; then
+        ip route add 172.16.0.0/12 via "$ETH_GW" dev eth0 2>/dev/null || true
+        ip route add 192.168.0.0/16 via "$ETH_GW" dev eth0 2>/dev/null || true
+        ip route add 10.0.0.0/8 via "$ETH_GW" dev eth0 2>/dev/null || true
+    fi
+
     # Switch to Russian DNS over the VPN tunnel.
     # Yandex DNS (77.88.8.8 / 77.88.8.1) is native Russian and reliably reachable
     # from a Russian IP. AdGuard (94.140.14.14) is a fast global fallback.
@@ -88,7 +96,7 @@ fi
 
 # 5. Start greentunnelRS proxy bound to all interfaces (host-accessible)
 echo -e "${YELLOW}[+] Starting greentunnelRS proxy on 0.0.0.0:${PROXY_PORT}...${RESET}"
-greentunnelRS --port "$PROXY_PORT" --bind 0.0.0.0 --dns-addr 77.88.8.8:53 --no-tls-padding --no-post-quantum >"$PROXY_LOG" 2>&1 &
+greentunnelRS --port "$PROXY_PORT" --bind 0.0.0.0 --dns-addr 77.88.8.8:53 >"$PROXY_LOG" 2>&1 &
 PROXY_PID=$!
 
 sleep 2

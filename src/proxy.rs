@@ -134,11 +134,11 @@ async fn run_worker_listener(
 
 async fn handle_client(
     mut client: TcpStream,
-    _client_addr: SocketAddr,
+    client_addr: SocketAddr,
     resolver: Arc<DnsResolver>,
     config: Arc<ProxyServerConfig>,
 ) -> anyhow::Result<()> {
-    // Enable TCP_NODELAY on client socket to eliminate Linux 40ms Nagle delay during HTTP CONNECT handshake
+    tracing::debug!("Accepted connection from client IP: {}", client_addr);
     client.set_nodelay(true).ok();
 
     let mut buf = [0u8; 4096];
