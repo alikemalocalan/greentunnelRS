@@ -1,16 +1,28 @@
+//! Zero-allocation TLS record payload fragmenter.
+
 use super::parser::TLS_RECORD_HEADER_SIZE;
 
 /// Represents a TLS record slice with a zero-allocation header and zero-copy payload slice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TlsRecordSlice<'a> {
+    /// Fixed 5-byte TLS record header (`ContentType` + `Version[2]` + `Length[2]`).
     pub header: [u8; TLS_RECORD_HEADER_SIZE],
+    /// Slice reference to the record payload data.
     pub payload: &'a [u8],
 }
 
 impl<'a> TlsRecordSlice<'a> {
+    /// Returns the total size of the TLS record in bytes (header + payload).
     #[inline]
     pub fn len(&self) -> usize {
         TLS_RECORD_HEADER_SIZE + self.payload.len()
+    }
+
+    /// Returns `true` if the record payload is empty.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.payload.is_empty()
     }
 }
 
@@ -23,12 +35,13 @@ pub fn build_tls_header(
     payload_len: usize,
 ) -> [u8; TLS_RECORD_HEADER_SIZE] {
     let len = payload_len as u16;
+    let len_bytes = len.to_be_bytes();
     [
         content_type,
         version_major,
         version_minor,
-        ((len >> 8) & 0xFF) as u8,
-        (len & 0xFF) as u8,
+        len_bytes[0],
+        len_bytes[1],
     ]
 }
 
@@ -87,8 +100,6 @@ pub fn fragment_at_offset<'a>(
     (record1, Some(record2))
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,6 +122,12 @@ mod tests {
         // Verify combined payload length equals original payload
         let payload1_len = rec1.payload.len();
         let payload2_len = rec2.payload.len();
-        assert_eq!(payload1_len + payload2_len, client_hello.len() - TLS_RECORD_HEADER_SIZE);
+        assert_eq!(
+            payload1_len + payload2_len,
+            client_hello.len() - TLS_RECORD_HEADER_SIZE
+        );
+
+        assert!(!rec1.is_empty());
+        assert!(!rec2.is_empty());
     }
 }

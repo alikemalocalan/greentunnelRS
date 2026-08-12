@@ -1,7 +1,10 @@
+//! Protocol utility functions for HTTP header manipulation, case mixing, and domain filtering.
+
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
+/// List of standard proxy tracking headers removed from HTTP request headers.
 pub const PROXY_HEADERS_TO_REMOVE: &[&str] = &[
     "client-ip",
     "x-forwarded-for",
@@ -12,6 +15,17 @@ pub const PROXY_HEADERS_TO_REMOVE: &[&str] = &[
     "via",
     "proxy-authorization",
     "proxy-connection",
+];
+
+/// List of Meta / Facebook / Instagram domains using strict C++ Fizz TLS stacks that reject padding extensions.
+pub const PADDING_INCOMPATIBLE_DOMAINS: &[&str] = &[
+    "instagram.com",
+    "facebook.com",
+    "fbcdn.net",
+    "cdninstagram.com",
+    "messenger.com",
+    "whatsapp.net",
+    "whatsapp.com",
 ];
 
 /// Splits a buffer into small randomized TCP segments (80-256 bytes) and writes them out.
@@ -37,23 +51,19 @@ pub async fn random_delay(min_ms: u64, max_ms: u64) {
     tokio::time::sleep(Duration::from_millis(delay_ms)).await;
 }
 
-/// Checks if a string case-insensitively starts with an HTTP CONNECT method.
+/// Checks if an HTTP request header string starts with an HTTP CONNECT method.
 pub fn is_http_connect(header_line: &str) -> bool {
     let trimmed = header_line.trim_start();
     let first_word = trimmed.split_whitespace().next().unwrap_or("");
     first_word.eq_ignore_ascii_case("CONNECT")
 }
 
-/// Detects domains (like Meta/Instagram/Facebook/WhatsApp) whose proprietary TLS stack (Fizz TLS) rejects TLS padding extensions.
+/// Detects domains whose proprietary TLS stack (Fizz TLS) rejects TLS padding extensions.
 pub fn is_padding_incompatible_domain(host: &str) -> bool {
     let lower = host.to_lowercase();
-    lower.ends_with("instagram.com")
-        || lower.ends_with("facebook.com")
-        || lower.ends_with("fbcdn.net")
-        || lower.ends_with("cdninstagram.com")
-        || lower.ends_with("messenger.com")
-        || lower.ends_with("whatsapp.net")
-        || lower.ends_with("whatsapp.com")
+    PADDING_INCOMPATIBLE_DOMAINS
+        .iter()
+        .any(|&domain| lower.ends_with(domain))
 }
 
 /// Parses the target domain and port from an HTTP CONNECT line (e.g. "CONNECT youtube.com:443 HTTP/1.1").
@@ -71,7 +81,7 @@ pub fn parse_connect_target(request_str: &str) -> Option<(String, u16)> {
     Some((host, port))
 }
 
-/// Strips proxy headers from an HTTP request header string.
+/// Strips proxy tracking headers from an HTTP request header string.
 pub fn strip_proxy_headers(request_str: &str) -> String {
     let mut lines = Vec::new();
     for (i, line) in request_str.lines().enumerate() {
@@ -215,6 +225,7 @@ mod tests {
         assert!(is_padding_incompatible_domain("instagram.com"));
         assert!(is_padding_incompatible_domain("www.instagram.com"));
         assert!(is_padding_incompatible_domain("facebook.com"));
+        assert!(is_padding_incompatible_domain("whatsapp.com"));
         assert!(!is_padding_incompatible_domain("youtube.com"));
         assert!(!is_padding_incompatible_domain("wikipedia.org"));
     }
@@ -254,5 +265,11 @@ mod tests {
         assert_eq!(ensure_trailing_dot("youtube.com."), "youtube.com.");
         assert_eq!(ensure_trailing_dot("127.0.0.1"), "127.0.0.1");
         assert_eq!(ensure_trailing_dot(""), "");
+    }
+
+    #[test]
+    fn test_mix_case() {
+        assert_eq!(mix_case("Host"), "hOsT");
+        assert_eq!(mix_case("User-Agent"), "uSeR-AgEnT");
     }
 }

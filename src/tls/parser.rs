@@ -1,15 +1,24 @@
+//! TLS ClientHello binary parser and builder for SNI extraction.
+
+/// TLS record layer content type for Handshake messages (`0x16`).
 pub const TLS_CONTENT_TYPE_HANDSHAKE: u8 = 0x16;
+/// TLS handshake layer type for ClientHello (`0x01`).
 pub const HANDSHAKE_TYPE_CLIENT_HELLO: u8 = 0x01;
+/// TLS extension type for Server Name Indication (SNI) (`0x0000`).
 pub const SNI_EXTENSION_TYPE: u16 = 0x0000;
+/// Fixed 5-byte outer TLS record header size (ContentType + Version[2] + Length[2]).
 pub const TLS_RECORD_HEADER_SIZE: usize = 5;
 
-#[derive(Debug, Clone, Copy)]
+/// Offset and length details of an SNI hostname within a TLS ClientHello payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SniInfo {
+    /// Byte offset of the hostname string within the raw TLS record.
     pub hostname_offset: usize,
+    /// Length of the hostname string in bytes.
     pub hostname_length: usize,
 }
 
-/// Checks if a byte slice starts with a valid TLS ClientHello.
+/// Checks if a byte slice starts with a valid TLS ClientHello record.
 pub fn is_client_hello(data: &[u8]) -> bool {
     if data.len() < 6 {
         return false;
@@ -26,7 +35,7 @@ pub fn find_sni_info(data: &[u8]) -> Option<SniInfo> {
         return None;
     }
 
-    let mut pos = TLS_RECORD_HEADER_SIZE; // Skip 5-byte record header
+    let mut pos = TLS_RECORD_HEADER_SIZE; // Skip 5-byte outer record header
 
     // Handshake header: type(1) + length(3)
     pos += 4;
@@ -129,11 +138,12 @@ pub fn find_extensions_length_offset(data: &[u8]) -> Option<usize> {
     Some(pos)
 }
 
+/// Reads a 16-bit big-endian unsigned integer from a byte slice at the given offset.
 pub fn read_u16(data: &[u8], offset: usize) -> Option<u16> {
     if offset + 2 > data.len() {
         None
     } else {
-        Some(((data[offset] as u16) << 8) | (data[offset + 1] as u16))
+        Some(u16::from_be_bytes([data[offset], data[offset + 1]]))
     }
 }
 
@@ -147,15 +157,13 @@ pub fn build_synthetic_client_hello(hostname: Option<&str>, include_padding: boo
 
         extensions_data.push(0x00);
         extensions_data.push(0x00);
-        extensions_data.push(((sni_ext_data_len >> 8) & 0xFF) as u8);
-        extensions_data.push((sni_ext_data_len & 0xFF) as u8);
+        extensions_data.extend_from_slice(&sni_ext_data_len.to_be_bytes());
 
         let sni_list_len = (1 + 2 + host_bytes.len()) as u16;
-        extensions_data.push(((sni_list_len >> 8) & 0xFF) as u8);
-        extensions_data.push((sni_list_len & 0xFF) as u8);
+        extensions_data.extend_from_slice(&sni_list_len.to_be_bytes());
         extensions_data.push(0x00);
-        extensions_data.push(((host_bytes.len() >> 8) & 0xFF) as u8);
-        extensions_data.push((host_bytes.len() & 0xFF) as u8);
+        let host_len = host_bytes.len() as u16;
+        extensions_data.extend_from_slice(&host_len.to_be_bytes());
         extensions_data.extend_from_slice(host_bytes);
     }
 
@@ -180,18 +188,18 @@ pub fn build_synthetic_client_hello(hostname: Option<&str>, include_padding: boo
     hs_body.push(0x00);
 
     let ext_len = extensions_data.len() as u16;
-    hs_body.push(((ext_len >> 8) & 0xFF) as u8);
-    hs_body.push((ext_len & 0xFF) as u8);
+    hs_body.extend_from_slice(&ext_len.to_be_bytes());
     hs_body.extend_from_slice(&extensions_data);
 
     let hs_len = (4 + hs_body.len()) as u16;
     let body_len = hs_body.len() as u16;
     let mut record = vec![
-        0x16, // TLS record: Handshake
-        0x03, 0x01, // TLS version 3.1
+        TLS_CONTENT_TYPE_HANDSHAKE,
+        0x03,
+        0x01, // TLS record version 3.1
         ((hs_len >> 8) & 0xFF) as u8,
         (hs_len & 0xFF) as u8,
-        0x01, // ClientHello
+        HANDSHAKE_TYPE_CLIENT_HELLO,
         0x00, // Handshake length high byte
         ((body_len >> 8) & 0xFF) as u8,
         (body_len & 0xFF) as u8,
@@ -207,7 +215,14 @@ pub mod tests {
 
     #[test]
     fn test_is_client_hello() {
-        let valid = vec![0x16, 0x03, 0x03, 0x00, 0x10, 0x01];
+        let valid = vec![
+            TLS_CONTENT_TYPE_HANDSHAKE,
+            0x03,
+            0x03,
+            0x00,
+            0x10,
+            HANDSHAKE_TYPE_CLIENT_HELLO,
+        ];
         assert!(is_client_hello(&valid));
 
         let invalid = b"GET / HTTP/1.1\r\n";
@@ -219,7 +234,26 @@ pub mod tests {
         let client_hello = build_synthetic_client_hello(Some("example.com"), false);
         let sni_info = find_sni_info(&client_hello).expect("SNI should be found");
         assert_eq!(sni_info.hostname_length, "example.com".len());
-        let extracted = std::str::from_utf8(&client_hello[sni_info.hostname_offset..sni_info.hostname_offset + sni_info.hostname_length]).unwrap();
+        let extracted = std::str::from_utf8(
+            &client_hello
+                [sni_info.hostname_offset..sni_info.hostname_offset + sni_info.hostname_length],
+        )
+        .unwrap();
         assert_eq!(extracted, "example.com");
+    }
+
+    #[test]
+    fn test_find_extensions_length_offset() {
+        let client_hello = build_synthetic_client_hello(Some("example.com"), false);
+        let offset = find_extensions_length_offset(&client_hello);
+        assert!(offset.is_some());
+    }
+
+    #[test]
+    fn test_read_u16() {
+        let data = [0x12, 0x34, 0x56];
+        assert_eq!(read_u16(&data, 0), Some(0x1234));
+        assert_eq!(read_u16(&data, 1), Some(0x3456));
+        assert_eq!(read_u16(&data, 2), None);
     }
 }

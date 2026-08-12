@@ -1,3 +1,7 @@
+//! GreenTunnel Rust CLI entry point.
+//!
+//! Ultra-fast, zero-dependency anti-censorship DPI bypass HTTP/HTTPS proxy.
+
 mod args;
 mod dns;
 mod proxy;
@@ -49,6 +53,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Lightweight, custom `tracing::Subscriber` for standard output logging without external subscriber dependencies.
 struct SimpleLogSubscriber {
     verbose: bool,
 }

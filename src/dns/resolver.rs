@@ -1,14 +1,35 @@
+//! Zero-dependency UDP DNS resolver with RFC 1035 parser and Type 65/64 record filtering.
+
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::UdpSocket;
 
+/// Default DNS resolver fallback endpoint.
+pub const DEFAULT_DNS_ADDR: &str = "127.0.0.1:53";
+/// RFC 1035 fixed header length in bytes.
+pub const DNS_HEADER_SIZE: usize = 12;
+/// Minimum Resource Record fixed header size (TYPE + CLASS + TTL + RDLENGTH).
+pub const DNS_RR_HEADER_MIN_SIZE: usize = 10;
+/// DNS Resource Record Type A (IPv4 host address).
+pub const DNS_TYPE_A: u16 = 1;
+/// DNS Resource Record Type 64 (SVCB - Service Binding).
+pub const DNS_TYPE_SVCB: u16 = 64;
+/// DNS Resource Record Type 65 (HTTPS - Service Binding for HTTPS).
+pub const DNS_TYPE_HTTPS: u16 = 65;
+/// DNS Class IN (Internet).
+pub const DNS_CLASS_IN: u16 = 1;
+/// DNS standard query flag with recursion desired (`0x0100`).
+pub const DNS_FLAGS_STANDARD_QUERY: u16 = 0x0100;
+
+/// Fast, lightweight UDP DNS resolver querying local loopback or configured resolver.
 pub struct DnsResolver {
     dns_addr: String,
 }
 
 impl DnsResolver {
+    /// Creates a new `DnsResolver` instance with the specified target IP:port string.
     pub fn new(dns_addr: &str) -> Self {
         let addr = if dns_addr.is_empty() {
-            "127.0.0.1:53".to_string()
+            DEFAULT_DNS_ADDR.to_string()
         } else if !dns_addr.contains(':') {
             format!("{}:53", dns_addr)
         } else {
@@ -18,29 +39,28 @@ impl DnsResolver {
         Self { dns_addr: addr }
     }
 
-    /// Resolves a domain hostname to an IP address using fast zero-dependency local UDP DNS (127.0.0.1:53).
+    /// Resolves a domain hostname to an `IpAddr` using direct UDP DNS query or system fallback.
     pub async fn resolve(&self, domain: &str) -> Option<IpAddr> {
         let clean_domain = domain.trim_end_matches('.');
 
-        // Fast path: if domain is already an IP address
+        // Fast path: if domain is already a valid IP address
         if let Ok(ip) = clean_domain.parse::<IpAddr>() {
             return Some(ip);
         }
 
         let query = build_dns_query(clean_domain);
 
-        // Try direct UDP DNS query to local loopback (127.0.0.1:53 / dnscrypt-proxy / dnsmasq)
+        // Try direct UDP DNS query to local loopback / resolver
         if let Some(resp_buf) = self.query_udp(&query).await {
             if let Some(ip) = parse_dns_response(&resp_buf) {
                 return Some(ip);
             }
         }
 
-        // Fallback: tokio system resolution if UDP socket query fails or times out
+        // Fallback: system resolution if UDP socket query fails or times out
         if let Ok(mut addrs) = tokio::net::lookup_host(format!("{}:443", clean_domain)).await {
             if let Some(addr) = addrs.next() {
-                let ip = addr.ip();
-                return Some(ip);
+                return Some(addr.ip());
             }
         }
 
@@ -71,25 +91,20 @@ impl DnsResolver {
     }
 }
 
-/// Builds a 100% RFC 1035 compliant binary DNS query packet for Type A (IPv4) host lookup.
+/// Builds an RFC 1035 compliant binary DNS query packet for Type A IPv4 host lookup.
 pub fn build_dns_query(domain: &str) -> Vec<u8> {
     let mut query = Vec::with_capacity(64);
     let tx_id: u16 = 1;
     query.extend_from_slice(&tx_id.to_be_bytes());
+    query.extend_from_slice(&DNS_FLAGS_STANDARD_QUERY.to_be_bytes());
 
-    // Flags: 0x0100 (Standard query, recursion desired)
-    query.extend_from_slice(&[0x01, 0x00]);
+    // Question count: 1, Answer count: 0, Authority count: 0, Additional count: 0
+    query.extend_from_slice(&1u16.to_be_bytes());
+    query.extend_from_slice(&0u16.to_be_bytes());
+    query.extend_from_slice(&0u16.to_be_bytes());
+    query.extend_from_slice(&0u16.to_be_bytes());
 
-    // QDCOUNT: 1
-    query.extend_from_slice(&[0x00, 0x01]);
-    // ANCOUNT: 0
-    query.extend_from_slice(&[0x00, 0x00]);
-    // NSCOUNT: 0
-    query.extend_from_slice(&[0x00, 0x00]);
-    // ARCOUNT: 0
-    query.extend_from_slice(&[0x00, 0x00]);
-
-    // QNAME: domain labels
+    // QNAME: dot-separated domain labels
     for part in domain.split('.') {
         let bytes = part.as_bytes();
         if !bytes.is_empty() {
@@ -99,17 +114,17 @@ pub fn build_dns_query(domain: &str) -> Vec<u8> {
     }
     query.push(0x00);
 
-    // QTYPE: 1 (A)
-    query.extend_from_slice(&[0x00, 0x01]);
-    // QCLASS: 1 (IN)
-    query.extend_from_slice(&[0x00, 0x01]);
+    // QTYPE: 1 (A), QCLASS: 1 (IN)
+    query.extend_from_slice(&DNS_TYPE_A.to_be_bytes());
+    query.extend_from_slice(&DNS_CLASS_IN.to_be_bytes());
 
     query
 }
 
 /// Parses an RFC 1035 binary DNS response packet and extracts the first IPv4 A-record address.
+/// Also filters out DNS Type 65 (HTTPS) / Type 64 (SVCB) records to evade ISP DNS poisoning.
 pub fn parse_dns_response(data: &[u8]) -> Option<IpAddr> {
-    if data.len() < 12 {
+    if data.len() < DNS_HEADER_SIZE {
         return None;
     }
 
@@ -125,12 +140,12 @@ pub fn parse_dns_response(data: &[u8]) -> Option<IpAddr> {
         return None;
     }
 
-    let mut pos = 12;
+    let mut pos = DNS_HEADER_SIZE;
 
     // Skip Question section
     for _ in 0..qdcount {
         let next_pos = skip_dns_name(data, pos)?;
-        pos = next_pos + 4; // Skip QTYPE + QCLASS
+        pos = next_pos + 4; // Skip QTYPE (2) + QCLASS (2)
     }
 
     // Parse Answer section records
@@ -139,25 +154,25 @@ pub fn parse_dns_response(data: &[u8]) -> Option<IpAddr> {
             break;
         };
         pos = next_pos;
-        if pos + 10 > data.len() {
+        if pos + DNS_RR_HEADER_MIN_SIZE > data.len() {
             break;
         }
 
         let rtype = u16::from_be_bytes([data[pos], data[pos + 1]]);
         let rdlen = u16::from_be_bytes([data[pos + 8], data[pos + 9]]) as usize;
-        pos += 10;
+        pos += DNS_RR_HEADER_MIN_SIZE;
 
         if pos + rdlen > data.len() {
             break;
         }
 
-        // DNS Type 65 (0x0041 / HTTPS) and Type 64 (0x0040 / SVCB) filtering to prevent ISP DNS poisoning
-        if rtype == 65 || rtype == 64 {
+        // DNS Type 65 (HTTPS) and Type 64 (SVCB) filtering to prevent ISP DNS poisoning
+        if rtype == DNS_TYPE_HTTPS || rtype == DNS_TYPE_SVCB {
             pos += rdlen;
             continue;
         }
 
-        if rtype == 1 && rdlen == 4 {
+        if rtype == DNS_TYPE_A && rdlen == 4 {
             let ip = IpAddr::V4(Ipv4Addr::new(
                 data[pos],
                 data[pos + 1],
@@ -173,12 +188,14 @@ pub fn parse_dns_response(data: &[u8]) -> Option<IpAddr> {
     None
 }
 
+/// Helper function to skip a domain label string in a binary DNS packet (supporting compression pointers).
 fn skip_dns_name(data: &[u8], mut pos: usize) -> Option<usize> {
     while pos < data.len() {
         let len = data[pos] as usize;
         if len == 0 {
             return Some(pos + 1);
         }
+        // Check for DNS pointer compression (`0xC0`)
         if (len & 0xC0) == 0xC0 {
             return Some(pos + 2);
         }
@@ -194,8 +211,74 @@ mod tests {
     #[test]
     fn test_build_dns_query() {
         let query = build_dns_query("example.com");
-        assert!(query.len() > 12);
-        assert_eq!(query[2], 0x01); // Flags
-        assert_eq!(query[3], 0x00);
+        assert!(query.len() > DNS_HEADER_SIZE);
+        assert_eq!(query[2], 0x01); // Flags high byte
+        assert_eq!(query[3], 0x00); // Flags low byte
+    }
+
+    #[test]
+    fn test_dns_resolver_new_defaults() {
+        let resolver = DnsResolver::new("");
+        assert_eq!(resolver.dns_addr, DEFAULT_DNS_ADDR);
+
+        let resolver_ip_only = DnsResolver::new("8.8.8.8");
+        assert_eq!(resolver_ip_only.dns_addr, "8.8.8.8:53");
+
+        let resolver_full = DnsResolver::new("1.1.1.1:53");
+        assert_eq!(resolver_full.dns_addr, "1.1.1.1:53");
+    }
+
+    #[test]
+    fn test_parse_dns_response_valid_a_record() {
+        // Construct synthetic DNS response for example.com -> 93.184.216.34
+        let mut packet = vec![
+            0x00, 0x01, // Tx ID
+            0x81, 0x80, // Standard response, No error
+            0x00, 0x01, // QDCOUNT = 1
+            0x00, 0x01, // ANCOUNT = 1
+            0x00, 0x00, 0x00, 0x00, // NSCOUNT, ARCOUNT
+        ];
+        // Question section: example.com, Type A, Class IN
+        packet.extend_from_slice(&[
+            7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm', 0, 0x00, 0x01, 0x00,
+            0x01,
+        ]);
+        // Answer section: compression ptr 0xC00C, Type A (1), Class IN (1), TTL (300), RDLEN (4), IP (93.184.216.34)
+        packet.extend_from_slice(&[
+            0xC0, 0x0C, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x01, 0x2C, 0x00, 0x04, 93, 184, 216,
+            34,
+        ]);
+
+        let resolved_ip = parse_dns_response(&packet);
+        assert_eq!(
+            resolved_ip,
+            Some(IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34)))
+        );
+    }
+
+    #[test]
+    fn test_parse_dns_response_filters_type65() {
+        // Response containing Type 65 record first, then Type A record
+        let mut packet = vec![
+            0x00, 0x01, 0x81, 0x80, 0x00, 0x01, 0x00, 0x02, // 2 answers
+            0x00, 0x00, 0x00, 0x00,
+        ];
+        // Question
+        packet.extend_from_slice(&[
+            7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm', 0, 0x00, 0x01, 0x00,
+            0x01,
+        ]);
+        // Answer 1: Type 65 (HTTPS), RDLEN = 5
+        packet.extend_from_slice(&[
+            0xC0, 0x0C, 0x00, 65, 0x00, 0x01, 0x00, 0x00, 0x00, 60, 0x00, 0x05, 0x01, 0x02, 0x03,
+            0x04, 0x05,
+        ]);
+        // Answer 2: Type A (1), IP (1.1.1.1)
+        packet.extend_from_slice(&[
+            0xC0, 0x0C, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 60, 0x00, 0x04, 1, 1, 1, 1,
+        ]);
+
+        let resolved_ip = parse_dns_response(&packet);
+        assert_eq!(resolved_ip, Some(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))));
     }
 }
