@@ -15,10 +15,10 @@ use crate::utils::{
     random_delay, split_and_write,
 };
 
-/// Client initial read buffer size (4 KB).
-pub const CLIENT_BUF_SIZE: usize = 4096;
-/// ClientHello handshake buffer size (8 KB).
-pub const CLIENT_HELLO_BUF_SIZE: usize = 8192;
+/// Client initial read buffer size (2 KB - optimized for MTU).
+pub const CLIENT_BUF_SIZE: usize = 2048;
+/// ClientHello handshake buffer size (4 KB - optimized for MTU).
+pub const CLIENT_HELLO_BUF_SIZE: usize = 4096;
 
 /// Standard HTTP response status payloads.
 pub const HTTP_200_ESTABLISHED: &[u8] = b"HTTP/1.1 200 Connection Established\r\n\r\n";
@@ -164,7 +164,11 @@ async fn handle_client(
         return Ok(());
     }
 
-    let request_str = String::from_utf8_lossy(&buf[..n]);
+    let request_bytes = &buf[..n];
+    let request_str = match std::str::from_utf8(request_bytes) {
+        Ok(s) => s.to_string(),
+        Err(_) => String::from_utf8_lossy(request_bytes).to_string(),
+    };
     let cleaned_request =
         preprocess_http_request(&request_str, config.http_space, config.mix_header_case);
 
@@ -322,15 +326,14 @@ async fn handle_connect_tunnel(
 
         // Separate the first TLS record (ClientHello) from any trailing buffer data
         let (raw_ch, trailing_data) = extract_first_tls_record(raw_bytes);
-        let bytes = raw_ch.to_vec();
 
-        if let Some(sni_info) = find_sni_info(&bytes) {
+        if let Some(sni_info) = find_sni_info(raw_ch) {
             if sni_info.hostname_length > 4 {
                 let cut_in_sni = calculate_sni_cut_offset(sni_info.hostname_length, &host);
                 let split_point = sni_info.hostname_offset + cut_in_sni;
 
-                if split_point > TLS_RECORD_HEADER_SIZE && split_point < bytes.len() {
-                    let (rec1, rec2) = fragment_at_offset(&bytes, split_point);
+                if split_point > TLS_RECORD_HEADER_SIZE && split_point < raw_ch.len() {
+                    let (rec1, rec2) = fragment_at_offset(raw_ch, split_point);
                     let is_meta = is_padding_incompatible_domain(&host);
 
                     transmit_tls_records(&mut remote, &rec1, rec2.as_ref(), trailing_data, is_meta)
@@ -351,7 +354,7 @@ async fn handle_connect_tunnel(
         }
 
         // Fallback: TCP fragmentation without TLS record split
-        split_and_write(&bytes, &mut remote).await?;
+        split_and_write(raw_ch, &mut remote).await?;
     }
 
     tunnel_bidirectional(&mut client, &mut remote).await?;

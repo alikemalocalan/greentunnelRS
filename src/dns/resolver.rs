@@ -1,4 +1,4 @@
-//! Zero-dependency UDP DNS resolver with RFC 1035 parser and Type 65/64 record filtering.
+//! Zero-dependency UDP DNS resolver with zero-allocation RFC 1035 parser and Type 65/64 record filtering.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::UdpSocket;
@@ -48,13 +48,14 @@ impl DnsResolver {
             return Some(ip);
         }
 
-        let query = build_dns_query(clean_domain);
+        let (query_buf, query_len) = build_dns_query(clean_domain);
+        if query_len == 0 {
+            return None;
+        }
 
-        // Try direct UDP DNS query to local loopback / resolver
-        if let Some(resp_buf) = self.query_udp(&query).await {
-            if let Some(ip) = parse_dns_response(&resp_buf) {
-                return Some(ip);
-            }
+        // Try direct UDP DNS query to local loopback / resolver (zero-heap allocation)
+        if let Some(ip) = self.query_udp(&query_buf[..query_len]).await {
+            return Some(ip);
         }
 
         // Fallback: system resolution if UDP socket query fails or times out
@@ -67,7 +68,7 @@ impl DnsResolver {
         None
     }
 
-    async fn query_udp(&self, query_msg: &[u8]) -> Option<Vec<u8>> {
+    async fn query_udp(&self, query_msg: &[u8]) -> Option<IpAddr> {
         let bind_addr: SocketAddr = "0.0.0.0:0".parse().ok()?;
         let socket = UdpSocket::bind(bind_addr).await.ok()?;
         let target_addr: SocketAddr = self.dns_addr.parse().ok()?;
@@ -77,13 +78,15 @@ impl DnsResolver {
                 continue;
             }
 
-            let mut buf = [0u8; 1024];
+            let mut buf = [0u8; 512];
             let timeout = std::time::Duration::from_millis(2500);
 
             if let Ok(Ok((len, _))) =
                 tokio::time::timeout(timeout, socket.recv_from(&mut buf)).await
             {
-                return Some(buf[..len].to_vec());
+                if let Some(ip) = parse_dns_response(&buf[..len]) {
+                    return Some(ip);
+                }
             }
         }
 
@@ -91,34 +94,45 @@ impl DnsResolver {
     }
 }
 
-/// Builds an RFC 1035 compliant binary DNS query packet for Type A IPv4 host lookup.
-pub fn build_dns_query(domain: &str) -> Vec<u8> {
-    let mut query = Vec::with_capacity(64);
+/// Builds an RFC 1035 compliant binary DNS query packet for Type A IPv4 host lookup into a stack-allocated buffer.
+pub fn build_dns_query(domain: &str) -> ([u8; 128], usize) {
+    let mut query = [0u8; 128];
+    if domain.len() > 100 {
+        return (query, 0);
+    }
+
     let tx_id: u16 = 1;
-    query.extend_from_slice(&tx_id.to_be_bytes());
-    query.extend_from_slice(&DNS_FLAGS_STANDARD_QUERY.to_be_bytes());
+    query[0..2].copy_from_slice(&tx_id.to_be_bytes());
+    query[2..4].copy_from_slice(&DNS_FLAGS_STANDARD_QUERY.to_be_bytes());
 
     // Question count: 1, Answer count: 0, Authority count: 0, Additional count: 0
-    query.extend_from_slice(&1u16.to_be_bytes());
-    query.extend_from_slice(&0u16.to_be_bytes());
-    query.extend_from_slice(&0u16.to_be_bytes());
-    query.extend_from_slice(&0u16.to_be_bytes());
+    query[4..6].copy_from_slice(&1u16.to_be_bytes());
+    query[6..8].copy_from_slice(&0u16.to_be_bytes());
+    query[8..10].copy_from_slice(&0u16.to_be_bytes());
+    query[10..12].copy_from_slice(&0u16.to_be_bytes());
+
+    let mut pos = DNS_HEADER_SIZE;
 
     // QNAME: dot-separated domain labels
     for part in domain.split('.') {
         let bytes = part.as_bytes();
-        if !bytes.is_empty() {
-            query.push(bytes.len() as u8);
-            query.extend_from_slice(bytes);
+        if !bytes.is_empty() && pos + 1 + bytes.len() < 120 {
+            query[pos] = bytes.len() as u8;
+            pos += 1;
+            query[pos..pos + bytes.len()].copy_from_slice(bytes);
+            pos += bytes.len();
         }
     }
-    query.push(0x00);
+    query[pos] = 0x00;
+    pos += 1;
 
     // QTYPE: 1 (A), QCLASS: 1 (IN)
-    query.extend_from_slice(&DNS_TYPE_A.to_be_bytes());
-    query.extend_from_slice(&DNS_CLASS_IN.to_be_bytes());
+    query[pos..pos + 2].copy_from_slice(&DNS_TYPE_A.to_be_bytes());
+    pos += 2;
+    query[pos..pos + 2].copy_from_slice(&DNS_CLASS_IN.to_be_bytes());
+    pos += 2;
 
-    query
+    (query, pos)
 }
 
 /// Parses an RFC 1035 binary DNS response packet and extracts the first IPv4 A-record address.
@@ -210,8 +224,8 @@ mod tests {
 
     #[test]
     fn test_build_dns_query() {
-        let query = build_dns_query("example.com");
-        assert!(query.len() > DNS_HEADER_SIZE);
+        let (query, len) = build_dns_query("example.com");
+        assert!(len > DNS_HEADER_SIZE);
         assert_eq!(query[2], 0x01); // Flags high byte
         assert_eq!(query[3], 0x00); // Flags low byte
     }
