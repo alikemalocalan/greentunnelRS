@@ -1,7 +1,7 @@
 //! Core multi-threaded async HTTP/HTTPS proxy server implementation.
 
 use std::io::IoSlice;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -20,11 +20,23 @@ pub const CLIENT_BUF_SIZE: usize = 2048;
 /// ClientHello handshake buffer size (4 KB - optimized for MTU).
 pub const CLIENT_HELLO_BUF_SIZE: usize = 4096;
 
+/// Static zero-bind addresses to avoid runtime string parsing on port rotation.
+pub const BIND_ZERO_V4: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
+pub const BIND_ZERO_V6: SocketAddr =
+    SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0));
+
 /// Standard HTTP response status payloads.
 pub const HTTP_200_ESTABLISHED: &[u8] = b"HTTP/1.1 200 Connection Established\r\n\r\n";
 pub const HTTP_400_BAD_REQUEST: &[u8] = b"HTTP/1.1 400 Bad Request\r\n\r\n";
 pub const HTTP_403_FORBIDDEN: &[u8] = b"HTTP/1.1 403 Forbidden\r\n\r\n";
 pub const HTTP_502_BAD_GATEWAY: &[u8] = b"HTTP/1.1 502 Bad Gateway\r\n\r\n";
+
+/// Static Benign Nginx 404 HTML server banner response payload.
+pub const BENIGN_NGINX_404_RESPONSE: &[u8] = b"HTTP/1.1 404 Not Found\r\nServer: nginx\r\nContent-Type: text/html\r\nContent-Length: 153\r\nConnection: close\r\n\r\n<html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n";
+
+/// HTTP 301 redirect response payload headers.
+pub const HTTP_301_PREFIX: &[u8] = b"HTTP/1.1 301 Moved Permanently\r\nLocation: https://";
+pub const HTTP_301_SUFFIX: &[u8] = b"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 
 /// Configuration parameters for the proxy server instance.
 pub struct ProxyServerConfig {
@@ -218,6 +230,8 @@ async fn handle_connect_tunnel(
         raw_host
     };
 
+    let is_meta = is_padding_incompatible_domain(&host);
+
     // Resolve domain via DoH/UDP resolver or standard IP lookup
     let remote_ip = match resolver.resolve(&host).await {
         Some(ip) => ip,
@@ -251,24 +265,8 @@ async fn handle_connect_tunnel(
 
     let remote_addr = SocketAddr::new(remote_ip, port);
 
-    // TCP Source Port Rotation: bind socket to explicit ephemeral port to evade 4-tuple blackhole bans
-    let outbound_socket = if remote_addr.is_ipv6() {
-        tokio::net::TcpSocket::new_v6()?
-    } else {
-        tokio::net::TcpSocket::new_v4()?
-    };
-    outbound_socket.set_reuseaddr(true).ok();
-
-    if config.port_rotate {
-        let bind_zero: SocketAddr = if remote_addr.is_ipv6() {
-            "[::]:0".parse()?
-        } else {
-            "0.0.0.0:0".parse()?
-        };
-        outbound_socket.bind(bind_zero).ok();
-    }
-
-    let mut remote = match outbound_socket.connect(remote_addr).await {
+    // Connect to target remote socket using configured TCP options
+    let mut remote = match connect_remote_socket(&client, remote_addr, &config).await {
         Ok(s) => s,
         Err(e) => {
             tracing::error!("Failed to connect to remote {}:{}", host, e);
@@ -276,26 +274,6 @@ async fn handle_connect_tunnel(
             return Ok(());
         }
     };
-
-    // Enable TCP_NODELAY to ensure split packets are sent immediately
-    remote.set_nodelay(true).ok();
-
-    // Apply TCP KeepAlive to prevent dead socket leaks on OpenWrt Linux kernel
-    let keepalive = socket2::TcpKeepalive::new().with_time(std::time::Duration::from_secs(60));
-    socket2::SockRef::from(&client)
-        .set_tcp_keepalive(&keepalive)
-        .ok();
-    socket2::SockRef::from(&remote)
-        .set_tcp_keepalive(&keepalive)
-        .ok();
-
-    // Apply TCP Window Shrinking if configured
-    if config.window_shrink > 0 {
-        let safe_win = config.window_shrink.max(4096);
-        let socket_ref = socket2::SockRef::from(&remote);
-        socket_ref.set_recv_buffer_size(safe_win).ok();
-        socket_ref.set_send_buffer_size(safe_win).ok();
-    }
 
     // Respond 200 Connection Established to client
     client.write_all(HTTP_200_ESTABLISHED).await?;
@@ -310,18 +288,16 @@ async fn handle_connect_tunnel(
         // Fake Packet TTL Injection on a separate dummy probe socket
         if config.fake_ttl > 0
             && !config.fake_sni.is_empty()
-            && !is_padding_incompatible_domain(&host)
+            && !is_meta
             && is_client_hello(raw_bytes)
         {
-            if let Ok(peer_addr) = remote.peer_addr() {
-                inject_fake_ttl_probe(peer_addr, &config.fake_sni, config.fake_ttl).await;
-                tracing::info!(
-                    "Fake TTL Packet injected on probe socket for {}: fake SNI {}, TTL {}",
-                    host,
-                    config.fake_sni,
-                    config.fake_ttl
-                );
-            }
+            inject_fake_ttl_probe(remote_addr, &config.fake_sni, config.fake_ttl).await;
+            tracing::info!(
+                "Fake TTL Packet injected on probe socket for {}: fake SNI {}, TTL {}",
+                host,
+                config.fake_sni,
+                config.fake_ttl
+            );
         }
 
         // Separate the first TLS record (ClientHello) from any trailing buffer data
@@ -334,7 +310,6 @@ async fn handle_connect_tunnel(
 
                 if split_point > TLS_RECORD_HEADER_SIZE && split_point < raw_ch.len() {
                     let (rec1, rec2) = fragment_at_offset(raw_ch, split_point);
-                    let is_meta = is_padding_incompatible_domain(&host);
 
                     transmit_tls_records(&mut remote, &rec1, rec2.as_ref(), trailing_data, is_meta)
                         .await?;
@@ -361,6 +336,49 @@ async fn handle_connect_tunnel(
     Ok(())
 }
 
+/// Connects an outbound TCP socket to the remote endpoint with TCP_NODELAY, keepalive, and optional port rotation/window shrink.
+async fn connect_remote_socket(
+    client: &TcpStream,
+    remote_addr: SocketAddr,
+    config: &ProxyServerConfig,
+) -> std::io::Result<TcpStream> {
+    let outbound_socket = if remote_addr.is_ipv6() {
+        tokio::net::TcpSocket::new_v6()?
+    } else {
+        tokio::net::TcpSocket::new_v4()?
+    };
+    outbound_socket.set_reuseaddr(true).ok();
+
+    if config.port_rotate {
+        let bind_zero = if remote_addr.is_ipv6() {
+            BIND_ZERO_V6
+        } else {
+            BIND_ZERO_V4
+        };
+        outbound_socket.bind(bind_zero).ok();
+    }
+
+    let remote = outbound_socket.connect(remote_addr).await?;
+    remote.set_nodelay(true).ok();
+
+    let keepalive = socket2::TcpKeepalive::new().with_time(std::time::Duration::from_secs(60));
+    socket2::SockRef::from(client)
+        .set_tcp_keepalive(&keepalive)
+        .ok();
+    socket2::SockRef::from(&remote)
+        .set_tcp_keepalive(&keepalive)
+        .ok();
+
+    if config.window_shrink > 0 {
+        let safe_win = config.window_shrink.max(4096);
+        let socket_ref = socket2::SockRef::from(&remote);
+        socket_ref.set_recv_buffer_size(safe_win).ok();
+        socket_ref.set_send_buffer_size(safe_win).ok();
+    }
+
+    Ok(remote)
+}
+
 /// Handles plaintext HTTP GET/POST requests by issuing a 301 Moved Permanently redirect to HTTPS.
 async fn handle_plaintext_redirect(mut client: TcpStream, request_str: &str) -> anyhow::Result<()> {
     let first_line = request_str.lines().next().unwrap_or("");
@@ -368,11 +386,11 @@ async fn handle_plaintext_redirect(mut client: TcpStream, request_str: &str) -> 
     let host_val = target_path.strip_prefix("http://").unwrap_or(target_path);
     let clean_host = host_val.split('/').next().unwrap_or(host_val);
 
-    let response = format!(
-        "HTTP/1.1 301 Moved Permanently\r\nLocation: https://{}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-        clean_host
-    );
-    let _ = client.write_all(response.as_bytes()).await;
+    write_all_vectored(
+        &mut client,
+        &[HTTP_301_PREFIX, clean_host.as_bytes(), HTTP_301_SUFFIX],
+    )
+    .await?;
     Ok(())
 }
 
@@ -381,13 +399,7 @@ async fn handle_active_probe_defense(mut client: TcpStream) -> anyhow::Result<()
     tracing::warn!(
         "Active probe detected from client, serving benign 404 response to mislead ISP scanner"
     );
-    let html_body = "<html>\r\n<head><title>404 Not Found</title></head>\r\n<body>\r\n<center><h1>404 Not Found</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n";
-    let response = format!(
-        "HTTP/1.1 404 Not Found\r\nServer: nginx\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        html_body.len(),
-        html_body
-    );
-    let _ = client.write_all(response.as_bytes()).await;
+    let _ = client.write_all(BENIGN_NGINX_404_RESPONSE).await;
     Ok(())
 }
 
@@ -407,7 +419,10 @@ fn extract_first_tls_record(raw_bytes: &[u8]) -> (&[u8], &[u8]) {
 
 fn calculate_sni_cut_offset(hostname_length: usize, host: &str) -> usize {
     if hostname_length > 6 {
-        let start_offset = if host.to_lowercase().starts_with("www.") {
+        let start_offset = if host
+            .get(..4)
+            .is_some_and(|s| s.eq_ignore_ascii_case("www."))
+        {
             4
         } else {
             0
